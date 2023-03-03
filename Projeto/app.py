@@ -27,6 +27,7 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
         self.info_btn_lst = []
         self.remove_btn_lst = []
         self.items_lst =[]
+        self.prev_checked_items = []
 
 
         for i, item in enumerate(item_list):
@@ -38,6 +39,7 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
             if item not in self.items_lst:
                 self.create_list_item(item)
                 self.items_lst.append(item)
+                self.prev_checked_items.append(0)
                 print("Added: ", item)
 
     # Create the items widgets
@@ -63,11 +65,14 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
     def remove_item(self, item):
         checked_items = self.get_checked_items()                # Get the boxes that are checked
 
-        for i in range(len(self.items_lst)):                    # Iterate trough the items
-            if item == self.checkbox_list[0].cget("text"):      # Check if it's the item we want to rmeove
+        for i in range(len(self.checkbox_list)):                    # Iterate trough the items
+            if item == self.checkbox_list[0].cget("text"):          # Check if it's the item we want to remove
                 print(self.items_lst)
                 print(i, "Removi :", item)
-                self.items_lst.pop(i)                           # Remove the item
+                idx = self.items_lst.index(self.checkbox_list[0].cget("text"))
+                self.items_lst.pop(idx)                             # Remove the item
+                self.prev_checked_items.pop(idx)
+                
             self.checkbox_list[0].destroy()                     # Destroy all the widgets
             self.info_btn_lst[0].destroy()                          #
             self.remove_btn_lst[0].destroy()                        #
@@ -100,7 +105,21 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
 
     # return de lista com items com check
     def get_checked_items(self):
-        return [checkbox.cget("text") for checkbox in self.checkbox_list if checkbox.get() == 1]
+        if len(self.checkbox_list) < len(self.items_lst):
+            items_checked = [checkbox.cget("text") for checkbox in self.checkbox_list if checkbox.get() == 1]
+            items_unchecked = [checkbox.cget("text") for checkbox in self.checkbox_list if checkbox.get() == 0]
+            indexes_c = [idx for idx, symbol in enumerate(self.items_lst) if symbol in items_checked]
+            indexes_u = [idx for idx, symbol in enumerate(self.items_lst) if symbol in items_unchecked]
+            for idx in indexes_c:
+                self.prev_checked_items[idx] = 1
+            for idx in indexes_u:
+                self.prev_checked_items[idx] = 0
+            return [self.items_lst[i] for i in range(len(self.items_lst)) if self.prev_checked_items[i] == 1]
+
+        else:
+            check_items = [checkbox.cget("text") for checkbox in self.checkbox_list if checkbox.get() == 1]
+            self.prev_checked_items = [1 if item in check_items else 0 for item in self.items_lst]
+            return check_items
 
 
 class App(ctk.CTk):
