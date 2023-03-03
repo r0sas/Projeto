@@ -28,9 +28,11 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
         self.remove_btn_lst = []
         self.items_lst =[]
 
+
         for i, item in enumerate(item_list):
             self.add_item(item)
 
+    # Add items to the list
     def add_items(self, items):
         for item in items:
             if item not in self.items_lst:
@@ -38,6 +40,7 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
                 self.items_lst.append(item)
                 print("Added: ", item)
 
+    # Create the items widgets
     def create_list_item(self, item):
         checkbox = ctk.CTkCheckBox(self, text=item, width=150)
         info_btn = ctk.CTkButton(master=self, text="Info", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), width=80)
@@ -56,30 +59,44 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
             print("Atualizei: ", item)
             self.create_list_item(item)
 
-    # remover botões
+    # Remove button
     def remove_item(self, item):
-        checked_items = self.get_checked_items()
-        if item in checked_items:
-            checked_items.remove(item)
+        checked_items = self.get_checked_items()                # Get the boxes that are checked
 
-        for i in range(len(self.items_lst)):
-            if item == self.checkbox_list[0].cget("text"): #porque estou a fazer pop do elemento mais a direita
+        for i in range(len(self.items_lst)):                    # Iterate trough the items
+            if item == self.checkbox_list[0].cget("text"):      # Check if it's the item we want to rmeove
                 print(self.items_lst)
                 print(i, "Removi :", item)
-                self.items_lst.pop(i)
-            self.checkbox_list[0].destroy()
-            self.info_btn_lst[0].destroy()
-            self.remove_btn_lst[0].destroy()
-            self.info_btn_lst.pop(0)
-            self.remove_btn_lst.pop(0)
-            self.checkbox_list.pop(0)    
+                self.items_lst.pop(i)                           # Remove the item
+            self.checkbox_list[0].destroy()                     # Destroy all the widgets
+            self.info_btn_lst[0].destroy()                          #
+            self.remove_btn_lst[0].destroy()                        #
+            self.info_btn_lst.pop(0)                                #
+            self.remove_btn_lst.pop(0)                              #
+            self.checkbox_list.pop(0)                               #
             
-        self.update_items()
-        for checkbox in self.checkbox_list:
+        self.update_items()                                     # Build all the widgets 
+        for checkbox in self.checkbox_list:                     # Check all the items that were previously checked
             if checkbox.cget("text") in checked_items:
                 checkbox.select()
-        app.plot_price(checked_items)
+        if item in checked_items:                               # If the item we removed was checked we need to make the plot again
+            checked_items.remove(item)            
+            app.plot_price(checked_items)
         return
+
+    def search_items(self, items):
+        symbols_plot = self.get_checked_items()
+        for i in range(len(self.checkbox_list)):
+            self.checkbox_list[0].destroy()                     # Destroy all the widgets
+            self.info_btn_lst[0].destroy()                          #
+            self.remove_btn_lst[0].destroy()                        #
+            self.info_btn_lst.pop(0)                                #
+            self.remove_btn_lst.pop(0)                              #
+            self.checkbox_list.pop(0)                               #
+        for i in range(len(items)):
+            self.create_list_item(items[i])
+            if items[i] in symbols_plot:
+                self.checkbox_list[i].select()
 
     # return de lista com items com check
     def get_checked_items(self):
@@ -161,7 +178,7 @@ class App(ctk.CTk):
             self.t = th.Thread(target=self.stocks_data.init_metrics)
             self.t.start()
         
-
+    # Create the plot graphic
     def plot_price(self, symbols_plot):
         self.plot_fig.clf()
         ax = self.plot_fig.add_subplot(111)
@@ -173,26 +190,31 @@ class App(ctk.CTk):
         self.canvas.draw()
         return self.canvas.get_tk_widget()
 
+    # Add stocks the the list
+    # Create the stock object
     def add_stocks(self):
         print("Add Stocks")
         symbols_added = self.entry_stocks.get().split(", ")
         print(symbols_added)
         for symbol in symbols_added:
-            print(symbol)
             if symbol not in self.symbols_lst:
                 self.symbols_lst.append(symbol)
                 self.stocks_data.add_stock(symbol)
-        print(self.symbols_lst)
         self.scrollable_checkbox_frame.add_items(self.symbols_lst)
 
+    # Function that updates the plot every time an item is checked
     def checkbox_frame_event(self):
         symbols_plot = self.scrollable_checkbox_frame.get_checked_items()
         print("Symbols plot :", symbols_plot)
         self.plot_price(symbols_plot)
 
+    # Function that search symbols on the stock list
     def search_symbols(self):
         string = self.search_bar_stocks.get()
         symbols = [symbol for symbol in self.symbols_lst if symbol == string or string in symbol]
+        print("Symbols searched :", symbols)
+        self.scrollable_checkbox_frame.search_items(symbols)
+        
 
 
 if __name__ == "__main__":
