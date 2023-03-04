@@ -6,6 +6,8 @@ import tkinter as tk
 import tkinter.messagebox
 import customtkinter as ctk
 
+import requests
+import bs4
 
 import matplotlib
 matplotlib.use("TkAgg")
@@ -16,7 +18,59 @@ from matplotlib.figure import Figure
 ctk.set_appearance_mode("System")  # Modes: "System" (standard), "Dark", "Light"
 ctk.set_default_color_theme("blue")  # Themes: "blue" (standard), "green", "dark-blue"
 
+class Info_window(ctk.CTkToplevel):
 
+    def __init__(self, symbol):
+        super().__init__()
+        self.title("Info " + symbol)
+        self.geometry(f"{720}x{580}")
+        self.grid_rowconfigure((0,1,2,3,4), weight = 0)
+        self.grid_rowconfigure(5, weight = 1)
+        self.grid_columnconfigure(0, weight=1)
+        
+        self.company_label = ctk.CTkLabel(self, text="Name: ", font=ctk.CTkFont(size=20, weight="bold"))
+        self.company_label.grid(row=0, column=0, padx=(10,10), pady=(10, 10), sticky = "w")
+
+        self.symbol_label = ctk.CTkLabel(self, text=("Stock symbol: " + symbol), font=ctk.CTkFont(size=18, weight="bold"))
+        self.symbol_label.grid(row=1, column=0, padx=(10,10), pady=(0, 10), sticky = "w")
+        
+        self.sectors_label = ctk.CTkLabel(self, text="Sector: ", font=ctk.CTkFont(size=16, weight="bold"))
+        self.sectors_label.grid(row=2, column=0, padx=(10,10), pady=(0, 10), sticky = "w")
+
+        self.industry_label = ctk.CTkLabel(self, text="Industry: ", font=ctk.CTkFont(size=16, weight="bold"))
+        self.industry_label.grid(row=3, column=0, padx=(10,10), pady=(0, 10), sticky = "w")
+
+        self.description_text_label = ctk.CTkLabel(self, text="Description: ", font=ctk.CTkFont(size=16, weight="bold"))
+        self.description_text_label.grid(row=4, column=0, padx=(10,10), pady=(0, 10), sticky = "w")
+
+        self.description_text = ctk.CTkTextbox(self, font=ctk.CTkFont(size=14))
+        self.description_text.grid(row = 5, column=0, sticky = "nsew", padx=(10,10), pady=(0,10))
+
+        self.webscrape_info(symbol)
+
+    # Get webpage source code
+    def webscrape_page(self, symbol):
+        url = "https://finance.yahoo.com/quote/" + symbol + "/profile?p=" + symbol
+        """Download a webpage and return a beautiful soup doc"""
+        response = requests.get(url, headers={'User-Agent': 'Custom'}) # to try and pass as a person accessing the website
+        if not response.ok:
+            print('Status code:', response.status_code)
+            raise Exception('Failed to load page {}'.format(url))
+        page_content = response.text
+        doc = bs4.BeautifulSoup(page_content, 'html.parser')
+        return doc
+
+    def webscrape_info(self, symbol):
+        doc = self.webscrape_page(symbol)
+        text = doc.find("h1", class_= "D(ib) Fz(18px)")
+        self.company_label.configure(text=text.text)
+
+        text = doc.find_all("span", class_= "Fw(600)")
+        self.sectors_label.configure(text=("Sector: " + text[1].text))
+        self.industry_label.configure(text=("Industry: " + text[2].text))
+        text = doc.find("p", class_= "Mt(15px) Lh(1.6)").text
+        self.description_text.insert("0.0", (text + "\n"))
+        self.description_text.configure(state="disabled")
 
 class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
     def __init__(self, master, item_list, command=None, **kwargs):
@@ -28,7 +82,7 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
         self.remove_btn_lst = []
         self.items_lst =[]
         self.prev_checked_items = []
-
+        self.info_window = None
 
         for i, item in enumerate(item_list):
             self.add_item(item)
@@ -45,7 +99,7 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
     # Create the items widgets
     def create_list_item(self, item):
         checkbox = ctk.CTkCheckBox(self, text=item, width=150)
-        info_btn = ctk.CTkButton(master=self, text="Info", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), width=80)
+        info_btn = ctk.CTkButton(master=self, text="Info", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), width=80, command=lambda: self.show_item_info(item))
         remove_btn = ctk.CTkButton(master=self, text="-", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"), width=40, command=lambda: self.remove_item(item))
         if self.command is not None:
             checkbox.configure(command=self.command)
@@ -89,6 +143,7 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
             app.plot_price(checked_items)
         return
 
+    # Search for items in the list
     def search_items(self, items):
         symbols_plot = self.get_checked_items()
         for i in range(len(self.checkbox_list)):
@@ -103,7 +158,7 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
             if items[i] in symbols_plot:
                 self.checkbox_list[i].select()
 
-    # return de lista com items com check
+    # Return of a list with the checked items
     def get_checked_items(self):
         if len(self.checkbox_list) < len(self.items_lst):
             items_checked = [checkbox.cget("text") for checkbox in self.checkbox_list if checkbox.get() == 1]
@@ -115,11 +170,17 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
             for idx in indexes_u:
                 self.prev_checked_items[idx] = 0
             return [self.items_lst[i] for i in range(len(self.items_lst)) if self.prev_checked_items[i] == 1]
-
         else:
             check_items = [checkbox.cget("text") for checkbox in self.checkbox_list if checkbox.get() == 1]
             self.prev_checked_items = [1 if item in check_items else 0 for item in self.items_lst]
             return check_items
+
+    def show_item_info(self, item):
+        if self.info_window is None or not self.info_window.winfo_exists():
+            self.info_window = Info_window(item)
+            self.info_window.focus()
+        else:
+            self.info_window.focus()
 
 
 class App(ctk.CTk):
@@ -178,6 +239,7 @@ class App(ctk.CTk):
 
         # Output text box
         self.output_textbox = ctk.CTkTextbox(self)
+        self.output_textbox.configure(state="disabled")
         self.output_textbox.grid(row = 3, column=1, columnspan=4, sticky = "nsew", padx=(10,10), pady=(10,10))
 
         # Create the plot figure and canvas
@@ -190,12 +252,27 @@ class App(ctk.CTk):
         toolbar.grid(row=0, column=4)
 
 
+
     def init_correlation(self):
         
         if not(self.init_thread):
             self.init_thread = True
-            self.t = th.Thread(target=self.stocks_data.init_metrics)
-            self.t.start()
+            t = th.Thread(target=self.stocks_data.init_metrics)
+            t.start()
+            t.join()
+            self.output_textbox.configure(state="normal")
+            self.output_textbox.insert(ctk.END, "The correlation is finished\n")
+            symbol = "    "
+            self.output_textbox.insert(ctk.END, f"{symbol:<10}")
+            for symbol in self.symbols_lst:
+                self.output_textbox.insert(ctk.END, f"{symbol:<10}")
+            self.output_textbox.insert(ctk.END, "\n")
+            for stock in self.stocks_data.stocks_array:
+                self.output_textbox.insert(ctk.END, f"{stock.symbol:<10}")
+                for value in stock.correlation:
+                    self.output_textbox.insert(ctk.END, f"{value:<10}")
+                self.output_textbox.insert(ctk.END, "\n")
+            self.output_textbox.configure(state="disabled")
         
     # Create the plot graphic
     def plot_price(self, symbols_plot):
@@ -217,8 +294,13 @@ class App(ctk.CTk):
         print(symbols_added)
         for symbol in symbols_added:
             if symbol not in self.symbols_lst:
-                self.symbols_lst.append(symbol)
-                self.stocks_data.add_stock(symbol)
+                result = self.stocks_data.add_stock(symbol)
+                if result == 0:
+                    self.symbols_lst.append(symbol)
+                else:
+                    self.output_textbox.configure(state="normal")
+                    self.output_textbox.insert(ctk.END, result + " " + symbol + "\n")
+                    self.output_textbox.configure(state="disabled")
         self.scrollable_checkbox_frame.add_items(self.symbols_lst)
 
     # Function that updates the plot every time an item is checked
