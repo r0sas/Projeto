@@ -4,10 +4,14 @@ from stock_app import Stock
 import threading as th
 import tkinter as tk
 import tkinter.messagebox
+from tkinter import ttk
 import customtkinter as ctk
 
+import os
 import requests
 import bs4
+from PIL import Image # To use images on the app
+
 
 import matplotlib
 matplotlib.use("TkAgg")
@@ -27,7 +31,7 @@ class Info_window(ctk.CTkToplevel):
         self.grid_rowconfigure((0,1,2,3,4), weight = 0)
         self.grid_rowconfigure(5, weight = 1)
         self.grid_columnconfigure(0, weight=1)
-        
+
         self.company_label = ctk.CTkLabel(self, text="Name: ", font=ctk.CTkFont(size=20, weight="bold"))
         self.company_label.grid(row=0, column=0, padx=(10,10), pady=(10, 10), sticky = "w")
 
@@ -193,66 +197,178 @@ class App(ctk.CTk):
         self.stocks_data = Stocks_data()
         self.symbols_lst = []
 
+        # Images
+        image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "images")
+        self.home_logo_image = ctk.CTkImage(light_image=Image.open(os.path.join(image_path, "home_logo.png")), size=(20, 20))
+
         # Configure window
         self.title("Financial Markets")
         self.geometry(f"{1100}x{580}")
 
         # Configure grid
             # weight = 0 fixo
-        self.grid_columnconfigure(4, weight=1)
+        self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure((2, 3), weight=1)
         self.grid_rowconfigure((0, 1), weight=0)
 
         # Side bar frame
-        self.sidebar_frame = ctk.CTkFrame(self, width=140, corner_radius=0)
-        self.sidebar_frame.grid(row=0, column=0, rowspan=4, sticky="nsew")
-        self.sidebar_frame.grid_rowconfigure(4, weight=1)
+        self.navigation_frame = ctk.CTkFrame(self, width=140, corner_radius=0)
+        self.navigation_frame.grid(row=0, column=0, rowspan=4, sticky="nsew")
+        self.navigation_frame.grid_rowconfigure(4, weight=1)
+
+
+        # Side bar home button
+        self.home_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Home",
+                                                   fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
+                                                   image=self.home_logo_image, anchor="w", command=self.home_button_event)
+        self.home_button.grid(row=0, column=0, sticky="ew")
+
+        # Home frame
+        self.home_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.home_frame.grid_columnconfigure(3, weight=1)
+        self.home_frame.grid_rowconfigure((2, 3), weight=1)
+        self.home_frame.grid_rowconfigure((0, 1), weight=0)
 
         # Symbols entry
-        self.entry_stocks = ctk.CTkEntry(self, placeholder_text = "Stocks (ex: TSLA, AMZN, META)", width=230)
-        self.entry_stocks.grid(row=0, column=1, columnspan=2, padx=(10, 0), pady=(10, 10), sticky="nsew")
+        self.entry_stocks = ctk.CTkEntry(self.home_frame, placeholder_text = "Stocks (ex: TSLA, AMZN, META)", width=230)
+        self.entry_stocks.grid(row=0, column=0, columnspan=2, padx=(10, 0), pady=(10, 10), sticky="nsew")
             
         # Symbols entry button
-        self.add_symbols_btn = ctk.CTkButton(master=self, text="Add", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"),
+        self.add_symbols_btn = ctk.CTkButton(self.home_frame, text="Add", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"),
                                                 command=self.add_stocks, width=50)
-        self.add_symbols_btn.grid(row=0, column=3, padx=(10, 10), pady=(10, 10), sticky="nsew")
+        self.add_symbols_btn.grid(row=0, column=2, padx=(10, 10), pady=(10, 10), sticky="nsew")
 
 
         # Scrollable Checkbox Symbols
-        self.scrollable_checkbox_frame = ScrollableCheckBoxFrame(master=self, command=self.checkbox_frame_event,
+        self.scrollable_checkbox_frame = ScrollableCheckBoxFrame(self.home_frame, command=self.checkbox_frame_event,
                                                                  item_list=[], width=280)
-        self.scrollable_checkbox_frame.grid(row=2, rowspan=1, column=1, columnspan=3 ,padx=(10,10), pady=(0,0), sticky="nsew")
+        self.scrollable_checkbox_frame.grid(row=2, rowspan=1, column=0, columnspan=3 ,padx=(10,10), pady=(0,0), sticky="nsew")
 
         # Search symbol entry
-        self.search_bar_stocks = ctk.CTkEntry(self, placeholder_text = "Search (ex: TSLA)", width=180)
-        self.search_bar_stocks.grid(row=1, column=1, columnspan=1, padx=(10, 0), pady=(10, 10), sticky="nsew")
+        self.search_bar_stocks = ctk.CTkEntry(self.home_frame, placeholder_text = "Search (ex: TSLA)", width=180)
+        self.search_bar_stocks.grid(row=1, column=0, columnspan=1, padx=(10, 0), pady=(10, 10), sticky="nsew")
 
         # Search symbol button
-        self.search_symbols_btn = ctk.CTkButton(master=self, text="Search", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"),
+        self.search_symbols_btn = ctk.CTkButton(self.home_frame, text="Search", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"),
                                                  command=self.search_symbols, width=50)
-        self.search_symbols_btn.grid(row=1, column=2, padx=(10, 10), pady=(10, 10), sticky="nsew")
+        self.search_symbols_btn.grid(row=1, column=1, padx=(10, 10), pady=(10, 10), sticky="nsew")
 
         # Correlate Button
-        self.add_symbols_btn = ctk.CTkButton(master=self, text="Correlate", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"),
+        self.correlate_btn = ctk.CTkButton(master=self.home_frame, text="Correlate", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"),
                                                 command=self.init_correlation, width=50)
-        self.add_symbols_btn.grid(row=1, column=3, padx=(0, 10), pady=(10, 10), sticky="w")
+        self.correlate_btn.grid(row=1, column=2, padx=(0, 10), pady=(10, 10), sticky="w")
 
         # Output text box
-        self.output_textbox = ctk.CTkTextbox(self)
+        self.output_textbox = ctk.CTkTextbox(self.home_frame)
         self.output_textbox.configure(state="disabled")
-        self.output_textbox.grid(row = 3, column=1, columnspan=4, sticky = "nsew", padx=(10,10), pady=(10,10))
+        self.output_textbox.grid(row = 3, column=0, columnspan=4, sticky = "nsew", padx=(10,10), pady=(10,10))
 
         # Create the plot figure and canvas
         self.plot_fig = Figure(figsize=(5,5), dpi=100)
-        self.canvas = FigureCanvasTkAgg(self.plot_fig, master=self)
-        self.canvas.get_tk_widget().grid(row=1, column=4, rowspan=2, sticky = "nsew")
+        self.canvas = FigureCanvasTkAgg(self.plot_fig, master=self.home_frame)
+        self.canvas.get_tk_widget().grid(row=1, column=3, rowspan=2, sticky = "nsew")
 
         # Create a toolbar and grid it onto the app
-        toolbar = NavigationToolbar2Tk(self.canvas, self, pack_toolbar=False)
-        toolbar.grid(row=0, column=4)
+        toolbar = NavigationToolbar2Tk(self.canvas, self.home_frame, pack_toolbar=False)
+        toolbar.grid(row=0, column=3)
+
+        # Side bar correlations button
+        self.correlations_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Correlations",
+                                                   fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
+                                                   anchor="w", command=self.correlations_button_event)
+        self.correlations_button.grid(row=1, column=0, sticky="ew")
+
+        # Correlations frame
+        self.correlations_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.correlations_frame.columnconfigure(0, weight=1)
+        self.correlations_frame.columnconfigure(1, weight=0)
+        self.correlations_frame.rowconfigure(0, weight=1)
+        self.correlations_frame.rowconfigure(1, weight=0)
+
+        self.correlations_table = ttk.Treeview(self.correlations_frame, show="headings")
+        self.correlations_table.grid(row=0, column=0, sticky="nsew")
+        # Create the Scrollbars
+        yscrollbar = ttk.Scrollbar(self.correlations_frame, orient='vertical', command=self.correlations_table.yview)
+        xscrollbar = ttk.Scrollbar(self.correlations_frame, orient='horizontal', command=self.correlations_table.xview)
+        self.correlations_table.configure(yscrollcommand=yscrollbar.set, xscrollcommand=xscrollbar.set)
+        yscrollbar.grid(row=0, column=1, sticky='ns')
+        xscrollbar.grid(row=1, column=0, sticky='ew')
+        style = ttk.Style()
+    
+        style.theme_use("default")
+
+        style.configure("Treeview.Heading",
+                        background="#565b5e",
+                        foreground="#FFFFFF",
+                        relief="flat")
+        style.map("Treeview.Heading",
+                    background=[('active', '#565b5e')])
+
+        style.configure("Treeview",
+                        background="#FFFFFF",
+                        foreground="#2a2d2e",
+                        rowheight=25,
+                        fieldbackground="#343638",
+                        bordercolor="#343638",
+                        borderwidth=0)
+        style.map('Treeview', background=[('selected', '#8694EE')])
 
 
+        # Start the app on the home frame
+        self.select_frame_by_name("home")
 
+    def select_frame_by_name(self, name):
+        # set button color for selected button
+        self.home_button.configure(fg_color=("gray75", "gray25") if name == "home" else "transparent")
+        self.correlations_button.configure(fg_color=("gray75", "gray25") if name == "correlations" else "transparent")
+        #self.frame_3_button.configure(fg_color=("gray75", "gray25") if name == "frame_3" else "transparent")
+
+        # show selected frame
+        if name == "home":
+            self.home_frame.grid(row = 0, rowspan=4, column=1, sticky="nsew")
+        else:
+            self.home_frame.grid_forget()
+        if name == "correlations":
+            self.correlations_frame.grid(row=0, rowspan=4, column=1, sticky="nsew")
+            self.correlations_table.grid(row=0, column=0, sticky="nsew")
+        else:
+            self.correlations_frame.grid_forget()
+
+    # Function triggered by the frame home button
+    def home_button_event(self):
+        self.select_frame_by_name("home")
+
+    # Function triggered by the frame correlations_button 
+    def correlations_button_event(self):
+        # Get a list of all the row identifiers
+        rows = self.correlations_table.get_children()
+
+        # Delete each row
+        for row in rows:
+            self.correlations_table.delete(row)
+
+        # Get the current columns
+        columns = self.correlations_table['columns']
+
+        # Delete the current columns
+        for col in columns:
+            self.correlations_table.column(col, width=0)
+            self.correlations_table.heading(col, text="")
+
+        columns = [stock.symbol for stock in self.stocks_data.stocks_array]
+        columns.insert(0, "Symbols")
+        self.correlations_table["columns"] = columns
+        for i, col in enumerate(columns):
+            self.correlations_table.column(col, width=100)
+            self.correlations_table.heading(col, text=col, anchor="w")
+        for stock in self.stocks_data.stocks_array:
+            corr = stock.correlation.copy()
+            corr.insert(0, stock.symbol)
+            self.correlations_table.insert("", "end", values = corr)
+
+        self.select_frame_by_name("correlations")
+
+    # Function triggered by the correlationn button
     def init_correlation(self):
         
         if not(self.init_thread):
@@ -262,17 +378,8 @@ class App(ctk.CTk):
             t.join()
             self.output_textbox.configure(state="normal")
             self.output_textbox.insert(ctk.END, "The correlation is finished\n")
-            symbol = "    "
-            self.output_textbox.insert(ctk.END, f"{symbol:<10}")
-            for symbol in self.symbols_lst:
-                self.output_textbox.insert(ctk.END, f"{symbol:<10}")
-            self.output_textbox.insert(ctk.END, "\n")
-            for stock in self.stocks_data.stocks_array:
-                self.output_textbox.insert(ctk.END, f"{stock.symbol:<10}")
-                for value in stock.correlation:
-                    self.output_textbox.insert(ctk.END, f"{value:<10}")
-                self.output_textbox.insert(ctk.END, "\n")
             self.output_textbox.configure(state="disabled")
+            self.init_thread = False
         
     # Create the plot graphic
     def plot_price(self, symbols_plot):
@@ -286,8 +393,9 @@ class App(ctk.CTk):
         self.canvas.draw()
         return self.canvas.get_tk_widget()
 
-    # Add stocks the the list
-    # Create the stock object
+    # Function triggered by the Add button 
+        # Add stocks the the list
+        # Create the stock object
     def add_stocks(self):
         print("Add Stocks")
         symbols_added = self.entry_stocks.get().split(", ")
