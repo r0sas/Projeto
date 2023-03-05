@@ -25,8 +25,9 @@ class Stock:
         self.coef_var = None                            # variable with coeficient of variation value
         result = self.init_close()
         if result == 1:
-            raise ValueError("Stock symbol not found")
-
+            raise ValueError("Didn't find the Stock Symbol: ")
+        if result == 2:
+            raise ValueError("Didn't gather enough data for the Stock Symbol: ")
 
     # Get webpage code
     def get_page(self,url):
@@ -53,22 +54,27 @@ class Stock:
         for row in rows:
             cols=row.find_all('td')                     #obtenção de colunas
             cols=[x.text.strip() for x in cols]
+            value = cols[-2]
+            if "," in value:                            # Removes commas from numbers
+                value = value.replace(",", "")
             try:                                        #Irá verificar se a coluna não tem informações acerca de stocks_split
-                float(cols[-2])
+                float(value)
             except:
                 pass
             else:
-                self.close_data.append(float(cols[-2]))         #guardar os dados do close, que estão na última coluna
-                self.log_close_data.append(math.log(float(cols[-2])))
+                self.close_data.append(float(value))         #guardar os dados do close, que estão na última coluna
+                self.log_close_data.append(math.log(float(value)))
                 i += 1;
             if i == self.n_ticks:
                 break
+        if i != self.n_ticks:
+            return 2
         return 0
 
-    def calc_rentability(self):
+    # Calculates the rentability 
+    def calc_rentability(self):              
         for i in range(1, self.n_ticks):
-            self.rentability.append(self.log_close_data[i]- self.log_close_data[i-1])
-
+            self.rentability.append(self.log_close_data[i] - self.log_close_data[i-1])
 
     # Calculate the return value
     def calc_return(self):
@@ -97,7 +103,6 @@ class Stock:
                      in zip(self.deviations, deviations_j)) / (Stock.n_ticks-2)
         corr_ij = cov_ij / (self.std_dev*std_dev_j)
         self.correlation[j] = corr_ij
-
 
     # Updates the value of rentability and return
     # To update the value of return we subtract the element that's going to "leave"
