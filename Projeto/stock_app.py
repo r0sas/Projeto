@@ -23,21 +23,28 @@ class Stock:
         self.variance = None                            # variable with variance value
         self.std_dev = None                             # variable with standard deviation value
         self.coef_var = None                            # variable with coeficient of variation value
+        self.prev_market_state = "Market open"
+
         result = self.init_close()
         if result == 1:
-            raise ValueError("Didn't find the Stock Symbol: ")
-        if result == 2:
-            raise ValueError("Didn't gather enough data for the Stock Symbol: ")
+            raise ValueError("Didn't find the Stock: " + symbol + "\n")
+        elif result == 2:
+            raise ValueError("Due the high frequency of webscraping couldn't webscrape the Stock: " + symbol + ", you should try again after some time\n")
+        elif result == 3:
+            raise ValueError("Didn't gather enough data for the Stock Symbol: " + symbol + "\n")
+        else:
+            self.close_data.reverse()
+            self.log_close_data.reverse()
 
     # Get webpage code
-    def get_page(self,url):
+    def webscrape_page(self,url):
         """Download a webpage and return a beautiful soup doc"""
         response = requests.get(url, headers={'User-Agent': 'Custom'}) # to try and pass as a person accessing the website
         if response.history:
             return 1
         if not response.ok:
             print('Status code:', response.status_code)
-            raise Exception('Failed to load page {}'.format(url))
+            return 2
         page_content = response.text
         doc = bs4.BeautifulSoup(page_content, 'html.parser')
         return doc
@@ -45,9 +52,9 @@ class Stock:
     # Get the past n_ticks close values 
     def init_close(self):
         history_url = "https://finance.yahoo.com/quote/" + self.symbol + "/history?p=" + self.symbol #concatenação de strings para obter a webpage da respetiva stock
-        doc = self.get_page(history_url)                     #obter dados da página
-        if doc == 1:
-            return 1
+        doc = self.webscrape_page(history_url)                     #obter dados da página
+        if doc == 1 or doc == 2:
+            return doc
         table_body = doc.find('tbody')                  #selecionar tabela de dados
         rows = table_body.find_all('tr')                #selecionar colunas
         i = 0
@@ -68,7 +75,7 @@ class Stock:
             if i == self.n_ticks:
                 break
         if i != self.n_ticks:
-            return 2
+            return 3
         return 0
 
     # Calculates the rentability 
@@ -91,18 +98,23 @@ class Stock:
     def calc_risk(self):
         self.variance = sum(value**2 for value in self.deviations) / (Stock.n_ticks-2)
         #check this and put this before the cycle "for" since if rtn = 0 it implies var = 0
-        if self.rtn == 0:
-            self.rtn = 1
-            self.variance = 1
-        self.coef_var = math.sqrt(self.variance) / self.rtn
-        self.std_dev = math.sqrt(self.variance)
+        if self.rtn == 0:                                               # Case of stock price is static
+            self.variance = 0
+            self.coef_var = 0
+        else:
+            self.coef_var = math.sqrt(self.variance) / self.rtn
+            self.std_dev = math.sqrt(self.variance)
 
         # Calculate the correlation of this stock and another
     def calc_correlation(self, j, deviations_j, std_dev_j):
-        cov_ij = sum(value_i * value_j for value_i, value_j 
-                     in zip(self.deviations, deviations_j)) / (Stock.n_ticks-2)
-        corr_ij = cov_ij / (self.std_dev*std_dev_j)
-        self.correlation[j] = corr_ij
+        if (self.rtn == 0) & (self.coef_var == 0):                      # Caso of stock price being static
+            self.correlation[j] = corr_ij
+            return 1
+        else:
+            cov_ij = sum(value_i * value_j for value_i, value_j 
+                         in zip(self.deviations, deviations_j)) / (Stock.n_ticks-2)
+            corr_ij = cov_ij / (self.std_dev*std_dev_j)
+            self.correlation[j] = corr_ij
 
     # Updates the value of rentability and return
     # To update the value of return we subtract the element that's going to "leave"
@@ -114,9 +126,9 @@ class Stock:
         self.rtn = self.rtn + (new_value-old_value) / (Stock.n_ticks - 1)
     
     # Get the current close data
-    def get_close(self):
+    def webscrape_close(self):
         history_url = "https://finance.yahoo.com/quote/" + self.symbol + "/history?p=" + self.symbol #concatenação de strings para obter a webpage da respetiva stock
-        doc = self.get_page(history_url)                     #obter dados da página
+        doc = self.webscrape_page(history_url)                     #obter dados da página
         text = doc.find_all("fin-streamer", class_="Fw(b) Fz(36px) Mb(-4px) D(ib)")
         return (float(text[0].text))
 
@@ -124,7 +136,7 @@ class Stock:
     # Save the new value in the deque
     # Save the log of the new value for the close on another deque
     def add_close(self):
-        close_value = self.get_close()
+        close_value = self.webscrape_close()
         self.close_data.append(close_value)
         self.log_close_data.append(math.log(close_value))
 
@@ -133,7 +145,6 @@ class Stock:
         self.calc_return()
         self.calc_deviations()
         self.calc_risk()
-        
 
     # Updates the values:
         # close, log_close
@@ -146,4 +157,21 @@ class Stock:
         self.calc_deviations()
         self.calc_risk()
 
-
+    def check_market_status(self):
+        history_url = "https://finance.yahoo.com/quote/" + self.symbol + "/history?p=" + self.symbol #concatenação de strings para obter a webpage da respetiva stock
+        doc = self.webscrape_page(history_url)                     #obter dados da página
+        if doc == 2:
+            raise ValueError("Didn't find the Stock : " + symbol + "\n")
+        if doc == 3:
+            raise ValueError("Due the high frequency of webscraping couldn't webscrape the Stock Symbol: " + symbol + ", you should try again after some time\n")
+        text = doc.find_all("div", {"id": "quote-market-notice"})
+        print(text)
+        market_state = ( str(text).replace(".</span></div>]","") ).split(". ")
+        print(market_state)
+        if isinstance(market_state, list):
+            self.prev_market_state == market_state
+            return 1
+        else:
+        #if (self.prev_market_state == "Market Open" & market_state != self.market_state):
+            self.prev_market_state == "Market Close"
+            return 0

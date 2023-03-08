@@ -7,6 +7,7 @@ import tkinter.messagebox
 from tkinter import ttk
 import customtkinter as ctk
 
+import time
 import os
 import requests
 import bs4
@@ -121,22 +122,23 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
 
     # Remove button
     def remove_item(self, item):
-        checked_items = self.get_checked_items()                # Get the boxes that are checked
-
-        for i in range(len(self.checkbox_list)):                    # Iterate trough the items
-            if item == self.checkbox_list[0].cget("text"):          # Check if it's the item we want to remove
-                print(self.items_lst)
-                print(i, "Removi :", item)
-                idx = self.items_lst.index(self.checkbox_list[0].cget("text"))
-                self.items_lst.pop(idx)                             # Remove the item
-                self.prev_checked_items.pop(idx)
+        if (not self.add_thread):                                       # Manage threads, if it's adding stocks it shouldn't remove since it may crash the a++
+            checked_items = self.get_checked_items()                # Get the boxes that are checked
+            for i in range(len(self.checkbox_list)):                    # Iterate trough the items
+                if item == self.checkbox_list[0].cget("text"):          # Check if it's the item we want to remove
+                    print(self.items_lst)
+                    print(i, "Removi :", item)
+                    idx = self.items_lst.index(self.checkbox_list[0].cget("text"))
+                    self.items_lst.pop(idx)                             # Remove the item
+                    self.prev_checked_items.pop(idx)
+                    app.remove_stock(idx)
                 
-            self.checkbox_list[0].destroy()                     # Destroy all the widgets
-            self.info_btn_lst[0].destroy()                          #
-            self.remove_btn_lst[0].destroy()                        #
-            self.info_btn_lst.pop(0)                                #
-            self.remove_btn_lst.pop(0)                              #
-            self.checkbox_list.pop(0)                               #
+                self.checkbox_list[0].destroy()                     # Destroy all the widgets
+                self.info_btn_lst[0].destroy()                          #
+                self.remove_btn_lst[0].destroy()                        #
+                self.info_btn_lst.pop(0)                                #
+                self.remove_btn_lst.pop(0)                              #
+                self.checkbox_list.pop(0)                               #
             
         self.update_items()                                     # Build all the widgets 
         for checkbox in self.checkbox_list:                     # Check all the items that were previously checked
@@ -194,8 +196,14 @@ class App(ctk.CTk):
         self.n_ticks = 60
         Stock.n_sticks = self.n_ticks
         self.init_thread = False
-        self.stocks_data = Stocks_data()
+        self.add_thread = False
+        self.update_stocks_thread = False
         self.symbols_lst = []
+        self.stocks_array = []
+        self.n_symbols = 0
+        background_update_thread = th.Thread(target=self.background_close_value_update)
+        background_update_thread.setDaemon(True)
+        background_update_thread.start()
 
         # Images
         image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "images")
@@ -235,7 +243,7 @@ class App(ctk.CTk):
             
         # Symbols entry button
         self.add_symbols_btn = ctk.CTkButton(self.home_frame, text="Add", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"),
-                                                command=self.add_stocks, width=50)
+                                                command=self.add_stocks_event, width=50)
         self.add_symbols_btn.grid(row=0, column=2, padx=(10, 10), pady=(10, 10), sticky="nsew")
 
 
@@ -265,13 +273,23 @@ class App(ctk.CTk):
 
         # Create the plot figure and canvas
         self.plot_fig = Figure(figsize=(5,5), dpi=100)
+        self.plot_fig.patch.set_facecolor('#242424')
         self.canvas = FigureCanvasTkAgg(self.plot_fig, master=self.home_frame)
         self.canvas.get_tk_widget().grid(row=1, column=3, rowspan=2, sticky = "nsew")
+        color = 'white'
+        matplotlib.rcParams['text.color'] = color
+        matplotlib.rcParams['axes.labelcolor'] = color
+        matplotlib.rcParams['xtick.color'] = color
+        matplotlib.rcParams['ytick.color'] = color
 
         # Create a toolbar and grid it onto the app
         toolbar = NavigationToolbar2Tk(self.canvas, self.home_frame, pack_toolbar=False)
         toolbar.grid(row=0, column=3)
-
+        #toolbar.setStyleSheet("background-color:Gray14;")
+        toolbar.config(bg='#242424')
+        toolbar._message_label.config(background='#242424')
+        toolbar._message_label.config(foreground='#FFFFFF')
+        toolbar.update()
         # Side bar correlations button
         self.correlations_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Correlations",
                                                    fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
@@ -338,7 +356,8 @@ class App(ctk.CTk):
     def home_button_event(self):
         self.select_frame_by_name("home")
 
-    # Function triggered by the frame correlations_button 
+    # Function triggered by the frame correlations_button
+        # It will add columns and rows to the correlation table
     def correlations_button_event(self):
         # Get a list of all the row identifiers
         rows = self.correlations_table.get_children()
@@ -355,13 +374,13 @@ class App(ctk.CTk):
             self.correlations_table.column(col, width=0)
             self.correlations_table.heading(col, text="")
 
-        columns = [stock.symbol for stock in self.stocks_data.stocks_array]
+        columns = [stock.symbol for stock in self.stocks_array]
         columns.insert(0, "Symbols")
         self.correlations_table["columns"] = columns
         for i, col in enumerate(columns):
             self.correlations_table.column(col, width=100)
             self.correlations_table.heading(col, text=col, anchor="w")
-        for stock in self.stocks_data.stocks_array:
+        for stock in self.stocks_array:
             corr = stock.correlation.copy()
             corr.insert(0, stock.symbol)
             self.correlations_table.insert("", "end", values = corr)
@@ -370,12 +389,11 @@ class App(ctk.CTk):
 
     # Function triggered by the correlationn button
     def init_correlation(self):
-        
         if not(self.init_thread):
             self.init_thread = True
-            t = th.Thread(target=self.stocks_data.init_metrics)
+            t = th.Thread(target=self.init_metrics)
+            t.setDaemon(True)
             t.start()
-            t.join()
             self.output_textbox.configure(state="normal")
             self.output_textbox.insert(ctk.END, "The correlation is finished\n")
             self.output_textbox.configure(state="disabled")
@@ -385,31 +403,41 @@ class App(ctk.CTk):
     def plot_price(self, symbols_plot):
         self.plot_fig.clf()
         ax = self.plot_fig.add_subplot(111)
+        for spine in ax.spines.values():
+            spine.set_edgecolor('white')
         for i in range(len(symbols_plot)):
-            for stock in self.stocks_data.stocks_array:
+            for stock in self.stocks_array:
                 if stock.symbol == symbols_plot[i]:
                     ax.plot(stock.close_data, label = symbols_plot[i])
         ax.legend(frameon=False)
+        ax.set_facecolor('#2B2B2B')
         self.canvas.draw()
         return self.canvas.get_tk_widget()
 
     # Function triggered by the Add button 
         # Add stocks the the list
         # Create the stock object
+    def add_stocks_event(self):
+        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread):
+            self.add_thread = True
+            t = th.Thread(target=self.add_stocks)
+            t.setDaemon(True)
+            t.start()
+            self.add_thread = False
+
     def add_stocks(self):
         print("Add Stocks")
         symbols_added = self.entry_stocks.get().split(", ")
         print(symbols_added)
         for symbol in symbols_added:
-            if symbol not in self.symbols_lst:
-                result = self.stocks_data.add_stock(symbol)
-                if result == 0:
-                    self.symbols_lst.append(symbol)
-                else:
-                    self.output_textbox.configure(state="normal")
-                    self.output_textbox.insert(ctk.END, result + " " + symbol + "\n")
-                    self.output_textbox.configure(state="disabled")
+            if symbol not in self.symbols_lst: #pop de stocks que já estão altero o tamanho da stock_data
+                self.add_stock(symbol)
         self.scrollable_checkbox_frame.add_items(self.symbols_lst)
+
+    # Check add_thread status (######################## not used ????)
+    def check_add_thread_status(self, thread):
+        if thread.is_alive():
+            self.after(100, self.check_thread_status, thread)
 
     # Function that updates the plot every time an item is checked
     def checkbox_frame_event(self):
@@ -423,8 +451,79 @@ class App(ctk.CTk):
         symbols = [symbol for symbol in self.symbols_lst if symbol == string or string in symbol]
         print("Symbols searched :", symbols)
         self.scrollable_checkbox_frame.search_items(symbols)
-        
 
+    # does the background calculus
+    def background_close_value_update(self):
+        while True:
+            current_time = time.localtime()  # get current time
+            min_til = 30 - current_time.tm_min % 30
+            sec_til = (min_til * 60 - current_time.tm_sec)
+            self.update_stocks_thread = False
+            print("Minutes till next update: " + str(min_til))
+            time.sleep(sec_til)
+            while ((self.add_thread != False) and (self.init_thread != False)):
+                print("Sleeping")
+                time.sleep(1)
+            self.update_stocks_thread = True
+            for stock in self.stocks_array:
+                try:
+                    status = stock.check_market_status()
+                    print(status)
+                    if status == 0:
+                        self.output_textbox.configure(state="normal")
+                        self.output_textbox.insert(ctk.END, "Updated the value of the Stock " + stock.symbol + ", " + stock.close_data(self.n_ticks-1))
+                        stock.update_data()
+                        self.output_textbox.insert(ctk.END, " -> " + + stock.close_data(self.n_ticks-1) + "\n")
+                        self.output_textbox.configure(state="disabled")
+                except ValueError as e:  
+                        self.output_textbox.configure(state="normal")
+                        self.output_textbox.insert(ctk.END, str(e))
+                        self.output_textbox.configure(state="disabled")
+            
+
+    # Removes stock from lists
+    def remove_stock(self, idx):
+        self.symbols_lst.pop(idx)                                   # Remove symbol from the list
+        self.stocks_array.pop(idx)                                  # Remove the stock from the stock_array
+        self.n_symbols -= 1                                         # Update the number of symbols
+        Stock.n_stocks = self.n_symbols                             # Update the number of stocks on the Stock class
+        for i in range(self.n_symbols):                             # Remove the other stocks correlations with the stock removed
+            self.stocks_array[i].correlation.pop(idx)
+
+    # Add and creates the stock object
+    def add_stock(self, symbol):
+        self.n_symbols += 1
+        Stock.n_stocks = self.n_symbols
+        try:
+            stock = Stock(symbol)
+            self.stocks_array.append(stock)
+            self.symbols_lst.append(symbol)
+            for i in range(self.n_symbols-1):    
+                self.stocks_array[i].correlation.append(0)    
+            return 0
+        except ValueError as e:
+            self.n_symbols -= 1
+            Stock.n_stocks = self.n_symbols
+            self.output_textbox.configure(state="normal")
+            self.output_textbox.insert(ctk.END, str(e))
+            self.output_textbox.configure(state="disabled")
+            return str(e)
+                  
+
+    def init_metrics(self):
+        for i in range(self.n_symbols):
+            self.stocks_array[i].init_metrics()
+        for i in range(self.n_symbols):
+            for j in range(i, self.n_symbols):
+                if i == j:
+                    self.stocks_array[i].correlation[j] = 1
+                else:
+                    result = self.stocks_array[i].calc_correlation(j, self.stocks_array[j].deviations, self.stocks_array[j].std_dev)
+                    self.stocks_array[j].correlation[i] = self.stocks_array[i].correlation[j]
+                    if result == 1:
+                        self.output_textbox.configure(state="normal")
+                        self.output_textbox.insert(ctk.END, "The close values of " + self.symbols_lst[i] + "are exactly the same over the time period\n")
+                        self.output_textbox.configure(state="disabled")
 
 if __name__ == "__main__":
     app = App()
