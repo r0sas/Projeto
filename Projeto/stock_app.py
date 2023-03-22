@@ -23,7 +23,7 @@ class Stock:
         self.variance = None                            # variable with variance value
         self.std_dev = None                             # variable with standard deviation value
         self.coef_var = None                            # variable with coeficient of variation value
-        self.prev_market_state = "Market open"
+        self.prev_market_state = "Market Open"
 
         result = self.init_close()
         if result == 1:
@@ -159,19 +159,21 @@ class Stock:
 
     def check_market_status(self):
         history_url = "https://finance.yahoo.com/quote/" + self.symbol + "/history?p=" + self.symbol #concatenação de strings para obter a webpage da respetiva stock
-        doc = self.webscrape_page(history_url)                     #obter dados da página
+        doc = self.webscrape_page(history_url)                     # Webscrapes the page
         if doc == 2:
-            raise ValueError("Didn't find the Stock : " + symbol + "\n")
+            raise ValueError("Didn't find the Stock : " + self.symbol + "\n")
         if doc == 3:
-            raise ValueError("Due the high frequency of webscraping couldn't webscrape the Stock Symbol: " + symbol + ", you should try again after some time\n")
+            raise ValueError("Due the high frequency of webscraping couldn't webscrape the Stock Symbol: " + self.symbol + ", you should try again after some time\n")
         text = doc.find_all("div", {"id": "quote-market-notice"})
         print(text)
         market_state = ( str(text).replace(".</span></div>]","") ).split(". ")
         print(market_state)
-        if isinstance(market_state, list):
-            self.prev_market_state == market_state
+        if len(market_state) == 2:  #analisar melhor as condições no sentido a  retirar o if possiblidade de iniciar com "Market open"
+            self.prev_market_state == "Market Open"
             return 1
-        else:
+        elif self.prev_market_state == "Market Open":                                        # This is the case where it manages to successfully webscrape "Market Open"
         #if (self.prev_market_state == "Market Open" & market_state != self.market_state):
-            self.prev_market_state == "Market Close"
+            self.prev_market_state = "Market Close"
             return 0
+        else:
+            return 1

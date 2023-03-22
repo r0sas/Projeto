@@ -361,30 +361,28 @@ class App(ctk.CTk):
     def correlations_button_event(self):
         # Get a list of all the row identifiers
         rows = self.correlations_table.get_children()
-
         # Delete each row
         for row in rows:
             self.correlations_table.delete(row)
-
         # Get the current columns
         columns = self.correlations_table['columns']
-
         # Delete the current columns
         for col in columns:
             self.correlations_table.column(col, width=0)
             self.correlations_table.heading(col, text="")
-
+        # Insert columns
         columns = [stock.symbol for stock in self.stocks_array]
         columns.insert(0, "Symbols")
         self.correlations_table["columns"] = columns
         for i, col in enumerate(columns):
             self.correlations_table.column(col, width=100)
             self.correlations_table.heading(col, text=col, anchor="w")
+        # Insert rows
         for stock in self.stocks_array:
             corr = stock.correlation.copy()
             corr.insert(0, stock.symbol)
             self.correlations_table.insert("", "end", values = corr)
-
+        # Select frame
         self.select_frame_by_name("correlations")
 
     # Function triggered by the correlationn button
@@ -425,6 +423,8 @@ class App(ctk.CTk):
             t.start()
             self.add_thread = False
 
+    # Checks if the stock is in list
+        #Adds the stocks to the scrollable frame
     def add_stocks(self):
         print("Add Stocks")
         symbols_added = self.entry_stocks.get().split(", ")
@@ -452,7 +452,7 @@ class App(ctk.CTk):
         print("Symbols searched :", symbols)
         self.scrollable_checkbox_frame.search_items(symbols)
 
-    # does the background calculus
+    # Does the background calculus
     def background_close_value_update(self):
         while True:
             current_time = time.localtime()  # get current time
@@ -467,13 +467,13 @@ class App(ctk.CTk):
             self.update_stocks_thread = True
             for stock in self.stocks_array:
                 try:
-                    status = stock.check_market_status()
+                    status = stock.check_market_status()            # check the if the market changed from close->open or open->close
                     print(status)
                     if status == 0:
                         self.output_textbox.configure(state="normal")
-                        self.output_textbox.insert(ctk.END, "Updated the value of the Stock " + stock.symbol + ", " + stock.close_data(self.n_ticks-1))
+                        self.output_textbox.insert(ctk.END, "Updated the value of the Stock " + stock.symbol + ", (" + str(stock.close_data[0])+ "," + str(stock.close_data[self.n_ticks-1]) + ")")
                         stock.update_data()
-                        self.output_textbox.insert(ctk.END, " -> " + + stock.close_data(self.n_ticks-1) + "\n")
+                        self.output_textbox.insert(ctk.END, " -> (" + str(stock.close_data[0]) + "," + str(stock.close_data[self.n_ticks-1]) + ")\n")
                         self.output_textbox.configure(state="disabled")
                 except ValueError as e:  
                         self.output_textbox.configure(state="normal")
@@ -501,7 +501,7 @@ class App(ctk.CTk):
             for i in range(self.n_symbols-1):    
                 self.stocks_array[i].correlation.append(0)    
             return 0
-        except ValueError as e:
+        except ValueError as e:                                     # If there's an error it shows the error to the user
             self.n_symbols -= 1
             Stock.n_stocks = self.n_symbols
             self.output_textbox.configure(state="normal")
@@ -509,7 +509,7 @@ class App(ctk.CTk):
             self.output_textbox.configure(state="disabled")
             return str(e)
                   
-
+    # Calculates the correlation of stocks
     def init_metrics(self):
         for i in range(self.n_symbols):
             self.stocks_array[i].init_metrics()
@@ -520,7 +520,7 @@ class App(ctk.CTk):
                 else:
                     result = self.stocks_array[i].calc_correlation(j, self.stocks_array[j].deviations, self.stocks_array[j].std_dev)
                     self.stocks_array[j].correlation[i] = self.stocks_array[i].correlation[j]
-                    if result == 1:
+                    if result == 1:                                 # Tells the user that the values of a stock remained static
                         self.output_textbox.configure(state="normal")
                         self.output_textbox.insert(ctk.END, "The close values of " + self.symbols_lst[i] + "are exactly the same over the time period\n")
                         self.output_textbox.configure(state="disabled")
