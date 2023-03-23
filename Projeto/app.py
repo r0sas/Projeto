@@ -122,13 +122,13 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
 
     # Remove button
     def remove_item(self, item):
-        if (not self.add_thread):                                       # Manage threads, if it's adding stocks it shouldn't remove since it may crash the a++
+        if (not app.add_thread):                                       # Manage threads, if it's adding stocks it shouldn't remove since it may crash the a++
             checked_items = self.get_checked_items()                # Get the boxes that are checked
             for i in range(len(self.checkbox_list)):                    # Iterate trough the items
                 if item == self.checkbox_list[0].cget("text"):          # Check if it's the item we want to remove
                     print(self.items_lst)
                     print(i, "Removi :", item)
-                    idx = self.items_lst.index(self.checkbox_list[0].cget("text"))
+                    idx = self.items_lst.index(item)
                     self.items_lst.pop(idx)                             # Remove the item
                     self.prev_checked_items.pop(idx)
                     app.remove_stock(idx)
@@ -140,14 +140,14 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
                 self.remove_btn_lst.pop(0)                              #
                 self.checkbox_list.pop(0)                               #
             
-        self.update_items()                                     # Build all the widgets 
-        for checkbox in self.checkbox_list:                     # Check all the items that were previously checked
-            if checkbox.cget("text") in checked_items:
-                checkbox.select()
-        if item in checked_items:                               # If the item we removed was checked we need to make the plot again
-            checked_items.remove(item)            
-            app.plot_price(checked_items)
-        return
+            self.update_items()                                     # Build all the widgets 
+            for checkbox in self.checkbox_list:                     # Check all the items that were previously checked
+                if checkbox.cget("text") in checked_items:
+                    checkbox.select()
+            if item in checked_items:                               # If the item we removed was checked we need to make the plot again
+                checked_items.remove(item)            
+                app.plot_rentability(checked_items)
+            return
 
     # Search for items in the list
     def search_items(self, items):
@@ -377,6 +377,7 @@ class App(ctk.CTk):
         for i, col in enumerate(columns):
             self.correlations_table.column(col, width=100)
             self.correlations_table.heading(col, text=col, anchor="w")
+        self.correlations_table.column("Symbols", width=70, minwidth=70, anchor="w")
         # Insert rows
         for stock in self.stocks_array:
             corr = stock.correlation.copy()
@@ -387,7 +388,7 @@ class App(ctk.CTk):
 
     # Function triggered by the correlationn button
     def init_correlation(self):
-        if not(self.init_thread):
+        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread):
             self.init_thread = True
             t = th.Thread(target=self.init_metrics)
             t.setDaemon(True)
@@ -398,7 +399,7 @@ class App(ctk.CTk):
             self.init_thread = False
         
     # Create the plot graphic
-    def plot_price(self, symbols_plot):
+    def plot_rentability(self, symbols_plot):
         self.plot_fig.clf()
         ax = self.plot_fig.add_subplot(111)
         for spine in ax.spines.values():
@@ -406,10 +407,13 @@ class App(ctk.CTk):
         for i in range(len(symbols_plot)):
             for stock in self.stocks_array:
                 if stock.symbol == symbols_plot[i]:
-                    ax.plot(stock.close_data, label = symbols_plot[i])
+                    ax.plot(stock.rentability, label = symbols_plot[i])
         ax.legend(frameon=False)
         ax.set_facecolor('#2B2B2B')
         self.canvas.draw()
+        self.plot_fig.suptitle("Rentability")
+        self.plot_fig.supxlabel("Days")
+        self.plot_fig.supylabel("Log(Value)")
         return self.canvas.get_tk_widget()
 
     # Function triggered by the Add button 
@@ -421,7 +425,6 @@ class App(ctk.CTk):
             t = th.Thread(target=self.add_stocks)
             t.setDaemon(True)
             t.start()
-            self.add_thread = False
 
     # Checks if the stock is in list
         #Adds the stocks to the scrollable frame
@@ -433,6 +436,7 @@ class App(ctk.CTk):
             if symbol not in self.symbols_lst: #pop de stocks que já estão altero o tamanho da stock_data
                 self.add_stock(symbol)
         self.scrollable_checkbox_frame.add_items(self.symbols_lst)
+        self.add_thread = False
 
     # Check add_thread status (######################## not used ????)
     def check_add_thread_status(self, thread):
@@ -443,7 +447,7 @@ class App(ctk.CTk):
     def checkbox_frame_event(self):
         symbols_plot = self.scrollable_checkbox_frame.get_checked_items()
         print("Symbols plot :", symbols_plot)
-        self.plot_price(symbols_plot)
+        self.plot_rentability(symbols_plot)
 
     # Function that search symbols on the stock list
     def search_symbols(self):

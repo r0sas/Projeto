@@ -23,7 +23,7 @@ class Stock:
         self.variance = None                            # variable with variance value
         self.std_dev = None                             # variable with standard deviation value
         self.coef_var = None                            # variable with coeficient of variation value
-        self.prev_market_state = "Market Open"
+        self.prev_market_state = None
 
         result = self.init_close()
         if result == 1:
@@ -35,6 +35,11 @@ class Stock:
         else:
             self.close_data.reverse()
             self.log_close_data.reverse()
+
+        if self.check_market_status() == 1:
+            self.prev_market_state = "Market Open"
+        else: 
+            self.prev_market_state = "Market Close"
 
     # Get webpage code
     def webscrape_page(self,url):
@@ -170,10 +175,10 @@ class Stock:
         print(market_state)
         if len(market_state) == 2:  #analisar melhor as condições no sentido a  retirar o if possiblidade de iniciar com "Market open"
             self.prev_market_state == "Market Open"
-            return 1
+            return 1                                                                         # Está aberto
         elif self.prev_market_state == "Market Open":                                        # This is the case where it manages to successfully webscrape "Market Open"
         #if (self.prev_market_state == "Market Open" & market_state != self.market_state):
             self.prev_market_state = "Market Close"
-            return 0
+            return 0                                                    #passa de aberto para fechado
         else:
-            return 1
+            return 2
