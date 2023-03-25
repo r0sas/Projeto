@@ -1,16 +1,16 @@
-from stocks_data import Stocks_data
 from stock_app import Stock
 
-import threading as th
 import tkinter as tk
 import tkinter.messagebox
 from tkinter import ttk
 import customtkinter as ctk
+from tksheet import Sheet
 
 import time
 import os
 import requests
 import bs4
+import threading as th
 from PIL import Image # To use images on the app
 
 
@@ -189,6 +189,48 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
             self.info_window.focus()
 
 
+class UI_Table(tk.Tk):
+    def __init__(self, main_window, **kw):
+        self.table = Sheet(main_window)
+        self.table.change_theme("dark")
+        self.table.grid(row=0, column=0, sticky="nsew")
+        self.heatmap_colors = ["#90083A", "#C93545", "#EE5F40", "#FAA15B", "#FED885", "#FEFDBA", "#E6EF92", "#A6D59E", "#63B99C", "#2D80B2", "#504A94"]
+        self.heatmap_intervals = [-0.85, -0.7, -0.5, -0.3, -0.1, 0.1, 0.3, 0.5, 0.7, 0.85]
+        self.n_colors = len(self.heatmap_colors)
+
+    def update_columns(self, headers): #pode ser otimizado
+        num_columns = len(self.table.headers())
+        num_rows = self.table.get_total_rows()
+        for i in range(num_rows):
+            self.table.delete_row(idx = 0, deselect_all = False, redraw = True)
+        for i in range(num_columns):
+            self.table.delete_column(idx = 0)
+        self.table.insert_columns(columns = len(headers), idx = "end", widths = None, deselect_all = False, add_rows = False, equalize_data_row_lengths = True,
+                   mod_column_positions = True,
+                   redraw = False)
+        self.table.headers((f"{c}" for c in headers))       
+
+    def insert_row(self, data):
+        self.table.insert_row(values=data)
+
+    def update_index(self):
+        self.table.row_index(newindex = self.table.headers(), index = None, reset_row_positions = False, show_index_if_not_sheet = True, redraw = False)
+
+    def heat_map(self):
+        num_columns = len(self.table.headers())
+        num_rows = self.table.get_total_rows()
+        for i in range(num_rows):
+            for j in range(num_columns):
+                value = float(self.table.get_cell_data(i, j, return_copy = True))
+                idx = self.n_colors - 1
+                for k in range(len(self.heatmap_intervals)):
+                    if value < self.heatmap_intervals[k]:
+                        idx = k
+                        break
+                self.table.highlight_cells(row = i, column = j, cells = [], canvas = "table", bg = self.heatmap_colors[idx], fg = "#19191E", redraw = False, overwrite = True)
+
+
+
 class App(ctk.CTk):
 
     def __init__(self):
@@ -300,38 +342,9 @@ class App(ctk.CTk):
         # Correlations frame
         self.correlations_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.correlations_frame.columnconfigure(0, weight=1)
-        self.correlations_frame.columnconfigure(1, weight=0)
         self.correlations_frame.rowconfigure(0, weight=1)
-        self.correlations_frame.rowconfigure(1, weight=0)
 
-        self.correlations_table = ttk.Treeview(self.correlations_frame, show="headings")
-        self.correlations_table.grid(row=0, column=0, sticky="nsew")
-        # Create the Scrollbars
-        yscrollbar = ttk.Scrollbar(self.correlations_frame, orient='vertical', command=self.correlations_table.yview)
-        xscrollbar = ttk.Scrollbar(self.correlations_frame, orient='horizontal', command=self.correlations_table.xview)
-        self.correlations_table.configure(yscrollcommand=yscrollbar.set, xscrollcommand=xscrollbar.set)
-        yscrollbar.grid(row=0, column=1, sticky='ns')
-        xscrollbar.grid(row=1, column=0, sticky='ew')
-        style = ttk.Style()
-    
-        style.theme_use("default")
-
-        style.configure("Treeview.Heading",
-                        background="#565b5e",
-                        foreground="#FFFFFF",
-                        relief="flat")
-        style.map("Treeview.Heading",
-                    background=[('active', '#565b5e')])
-
-        style.configure("Treeview",
-                        background="#FFFFFF",
-                        foreground="#2a2d2e",
-                        rowheight=25,
-                        fieldbackground="#343638",
-                        bordercolor="#343638",
-                        borderwidth=0)
-        style.map('Treeview', background=[('selected', '#8694EE')])
-
+        self.correlations_table = UI_Table(self.correlations_frame)
 
         # Start the app on the home frame
         self.select_frame_by_name("home")
@@ -349,7 +362,6 @@ class App(ctk.CTk):
             self.home_frame.grid_forget()
         if name == "correlations":
             self.correlations_frame.grid(row=0, rowspan=4, column=1, sticky="nsew")
-            self.correlations_table.grid(row=0, column=0, sticky="nsew")
         else:
             self.correlations_frame.grid_forget()
 
@@ -360,31 +372,12 @@ class App(ctk.CTk):
     # Function triggered by the frame correlations_button
         # It will add columns and rows to the correlation table
     def correlations_button_event(self):
-        # Get a list of all the row identifiers
-        rows = self.correlations_table.get_children()
-        # Delete each row
-        for row in rows:
-            self.correlations_table.delete(row)
-        # Get the current columns
-        columns = self.correlations_table['columns']
-        # Delete the current columns
-        for col in columns:
-            self.correlations_table.column(col, width=0)
-            self.correlations_table.heading(col, text="")
-        # Insert columns
-        columns = [stock.symbol for stock in self.stocks_array]
-        columns.insert(0, "Symbols")
-        self.correlations_table["columns"] = columns
-        for i, col in enumerate(columns):
-            self.correlations_table.column(col, width=100)
-            self.correlations_table.heading(col, text=col, anchor="w")
-        self.correlations_table.column("Symbols", width=70, minwidth=70, anchor="w")
-        # Insert rows
+        self.correlations_table.update_columns(self.symbols_lst)
         for stock in self.stocks_array:
-            corr = stock.correlation.copy()
-            corr.insert(0, stock.symbol)
-            self.correlations_table.insert("", "end", values = corr)
-        # Select frame
+            correlation_data = [ '%.2f' % elem for elem in stock.correlation ]
+            self.correlations_table.insert_row(correlation_data)
+        self.correlations_table.update_index()
+        self.correlations_table.heat_map()
         self.select_frame_by_name("correlations")
 
     # Function triggered by the correlationn button
@@ -435,7 +428,7 @@ class App(ctk.CTk):
         #Adds the stocks to the scrollable frame
     def add_stocks(self):
         print("Add Stocks")
-        symbols_added = self.entry_stocks.get().split(", ")
+        symbols_added = self.entry_stocks.get().replace(";",",").split(", ")
         print(symbols_added)
         for symbol in symbols_added:
             if symbol not in self.symbols_lst: #pop de stocks que já estão altero o tamanho da stock_data
