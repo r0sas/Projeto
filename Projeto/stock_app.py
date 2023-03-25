@@ -8,7 +8,7 @@ from collections import deque
 
 class Stock:
     # Class-level variables
-    n_ticks = 60                                         # class-level variable with the number of ticks
+    n_ticks = 30                                         # class-level variable with the number of ticks
     n_stocks = 0                                        # class-level variable with the number of stocks
 
     # Inicialization of the object

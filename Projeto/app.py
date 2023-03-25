@@ -193,7 +193,7 @@ class App(ctk.CTk):
 
     def __init__(self):
         super().__init__()
-        self.n_ticks = 60
+        self.n_ticks = 30
         Stock.n_sticks = self.n_ticks
         self.init_thread = False
         self.add_thread = False
@@ -262,8 +262,9 @@ class App(ctk.CTk):
         self.search_symbols_btn.grid(row=1, column=1, padx=(10, 10), pady=(10, 10), sticky="nsew")
 
         # Correlate Button
-        self.correlate_btn = ctk.CTkButton(master=self.home_frame, text="Correlate", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"),
-                                                command=self.init_correlation, width=50)
+        self.correlate_btn = ctk.CTkButton(master=self.home_frame, text="Correlate", fg_color="transparent", border_width=2,
+                                          text_color=("gray10", "#DCE4EE"), width=50)
+
         self.correlate_btn.grid(row=1, column=2, padx=(0, 10), pady=(10, 10), sticky="w")
 
         # Output text box
@@ -388,15 +389,16 @@ class App(ctk.CTk):
 
     # Function triggered by the correlationn button
     def init_correlation(self):
-        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread):
-            self.init_thread = True
-            t = th.Thread(target=self.init_metrics)
-            t.setDaemon(True)
-            t.start()
-            self.output_textbox.configure(state="normal")
-            self.output_textbox.insert(ctk.END, "The correlation is finished\n")
-            self.output_textbox.configure(state="disabled")
-            self.init_thread = False
+        while (self.add_thread or self.update_stocks_thread or self.init_thread):
+            time.sleep(1)
+        self.init_thread = True
+        t = th.Thread(target=self.init_metrics)
+        t.setDaemon(True)
+        t.start()
+        self.output_textbox.configure(state="normal")
+        self.output_textbox.insert(ctk.END, "The correlation is finished\n")
+        self.output_textbox.configure(state="disabled")
+        self.init_thread = False
         
     # Create the plot graphic
     def plot_rentability(self, symbols_plot):
@@ -410,10 +412,10 @@ class App(ctk.CTk):
                     ax.plot(stock.rentability, label = symbols_plot[i])
         ax.legend(frameon=False)
         ax.set_facecolor('#2B2B2B')
+        ax.set_title("Rentability")
+        ax.set_xlabel("Days")
+        ax.set_ylabel("Log(Value)")
         self.canvas.draw()
-        self.plot_fig.suptitle("Rentability")
-        self.plot_fig.supxlabel("Days")
-        self.plot_fig.supylabel("Log(Value)")
         return self.canvas.get_tk_widget()
 
     # Function triggered by the Add button 
@@ -422,9 +424,12 @@ class App(ctk.CTk):
     def add_stocks_event(self):
         if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread):
             self.add_thread = True
-            t = th.Thread(target=self.add_stocks)
-            t.setDaemon(True)
-            t.start()
+            t_add = th.Thread(target=self.add_stocks)
+            t_add.setDaemon(True)
+            t_add.start()
+            t_corr = th.Thread(target=self.init_correlation)
+            t_corr.setDaemon(True)
+            t_corr.start()
 
     # Checks if the stock is in list
         #Adds the stocks to the scrollable frame
@@ -484,7 +489,6 @@ class App(ctk.CTk):
                         self.output_textbox.insert(ctk.END, str(e))
                         self.output_textbox.configure(state="disabled")
             
-
     # Removes stock from lists
     def remove_stock(self, idx):
         self.symbols_lst.pop(idx)                                   # Remove symbol from the list
