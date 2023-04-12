@@ -3,27 +3,34 @@ import requests
 import math
 import matplotlib.pyplot as plt
 import numpy as np
-
+import itertools
 from collections import deque
 
 class Stock:
     # Class-level variables
     n_ticks = 30                                         # class-level variable with the number of ticks
     n_stocks = 0                                        # class-level variable with the number of stocks
+    n_windows = 30
 
     # Inicialization of the object
     def __init__(self, symbol: str):
         self.symbol: str = symbol                               # symbol symbol
-        self.close_data = deque(maxlen = Stock.n_ticks)         # deque with close values
-        self.log_close_data = deque(maxlen = Stock.n_ticks)     # deque with logaritmic close values
-        self.rentability = deque(maxlen = (Stock.n_ticks - 1))  # deque with rentability values
+        self.close_data = deque(maxlen = Stock.n_ticks + Stock.n_windows -1)         # deque with close values
+        self.log_close_data = deque(maxlen = Stock.n_ticks + Stock.n_windows -1)     # deque with logaritmic close values
+        self.rentability = deque(maxlen = (Stock.n_ticks + Stock.n_windows - 2))  # deque with rentability values
+        self.curr_rentability = deque(maxlen = (Stock.n_ticks-1))
         self.deviations = deque(maxlen = (Stock.n_ticks - 1))   # deque with deviation values
-        self.correlation = [0] * Stock.n_stocks                 # list with correlation values
-        self.rtn = None                                 # variable with return value
-        self.variance = None                            # variable with variance value
-        self.std_dev = None                             # variable with standard deviation value
-        self.coef_var = None                            # variable with coeficient of variation value
+        self.correlation = None                 # list with correlation values
+        self.correlations_history = [deque(maxlen=Stock.n_windows) for i in range(Stock.n_stocks)] # list with all correlations values for each stock
+        self.rtn = deque(maxlen = Stock.n_windows)              # deque with return value
+        self.variance = deque(maxlen = Stock.n_windows)         # deque with variance value
+        self.std_dev = deque(maxlen = Stock.n_windows)          # deque with standard deviation value
         self.prev_market_state = None
+
+        if self.check_market_status() == 1:
+            self.prev_market_state = "Market Open"
+        else: 
+            self.prev_market_state = "Market Close"
 
         result = self.init_close()
         if result == 1:
@@ -36,10 +43,7 @@ class Stock:
             self.close_data.reverse()
             self.log_close_data.reverse()
 
-        if self.check_market_status() == 1:
-            self.prev_market_state = "Market Open"
-        else: 
-            self.prev_market_state = "Market Close"
+        self.init_metrics()
 
     # Get webpage code
     def webscrape_page(self,url):
@@ -63,6 +67,8 @@ class Stock:
         table_body = doc.find('tbody')                  #selecionar tabela de dados
         rows = table_body.find_all('tr')                #selecionar colunas
         i = 0
+        if self.prev_market_state == "Market Open":
+            rows.pop(0)
         for row in rows:
             cols=row.find_all('td')                     #obtenção de colunas
             cols=[x.text.strip() for x in cols]
@@ -77,58 +83,67 @@ class Stock:
                 self.close_data.append(float(value))         #guardar os dados do close, que estão na última coluna
                 self.log_close_data.append(math.log(float(value)))
                 i += 1;
-            if i == self.n_ticks:
+            if i == (Stock.n_ticks + Stock.n_windows-1):
                 break
-        if i != self.n_ticks:
+        if i != (Stock.n_ticks + Stock.n_windows-1):
             return 3
         return 0
 
     # Calculates the rentability 
     def calc_rentability(self):              
-        for i in range(1, self.n_ticks):
+        for i in range(1, (Stock.n_ticks + Stock.n_windows-1)):
             self.rentability.append(self.log_close_data[i] - self.log_close_data[i-1])
 
     # Calculate the return value
-    def calc_return(self):
-        self.rtn = sum(self.rentability) / (Stock.n_ticks-1)
+    def init_return(self):
+        self.rtn.append( sum(self.curr_rentability) / (Stock.n_ticks - 1) )
 
-    def calc_deviations(self):
+    def calc_deviations(self,index):
         #possible use of numpy
-        self.deviations = deque([value - self.rtn for value in self.rentability])
+        self.deviations = deque([value - self.rtn[index] for value in self.curr_rentability]) #dar update à rentabilidade
 
     # Calculate some risk metrics
         # calculate variance
         # calculate standard deviation
-        # calculate coeficient of variation
-    def calc_risk(self):
-        self.variance = sum(value**2 for value in self.deviations) / (Stock.n_ticks-2)
-        #check this and put this before the cycle "for" since if rtn = 0 it implies var = 0
-        if self.rtn == 0:                                               # Case of stock price is static
-            self.variance = 0
-            self.coef_var = 0
+    def calc_risk(self, index):
+        if self.rtn[index] == 0:                                               # Case of stock price is static
+            self.variance.append(0)
+            self.std_dev.append(0)
         else:
-            self.coef_var = math.sqrt(self.variance) / self.rtn
-            self.std_dev = math.sqrt(self.variance)
+            self.variance.append(sum(value**2 for value in self.deviations) / (Stock.n_ticks-2))
+            self.std_dev.append(math.sqrt(self.variance[index]))
+
+    def init_metrics(self):
+        self.calc_rentability()
+        ([self.curr_rentability.append(self.rentability[i]) for i in range(self.n_ticks-1) ])
+        self.init_return()
+        self.calc_deviations(0)
+        self.calc_risk(0)
+
+    def update_metrics(self, index):
+        self.update_rentability(index)
+        self.calc_deviations(index)
+        self.calc_risk(index)
 
         # Calculate the correlation of this stock and another
-    def calc_correlation(self, j, deviations_j, std_dev_j):
-        if (self.rtn == 0) & (self.coef_var == 0):                      # Caso of stock price being static
+    def calc_correlation(self, j, deviations_j, std_dev_j, index):
+        if (self.rtn == 0):                                             # Case of stock price being static
             self.correlation[j] = corr_ij
             return 1
         else:
             cov_ij = sum(value_i * value_j for value_i, value_j 
                          in zip(self.deviations, deviations_j)) / (Stock.n_ticks-2)
-            corr_ij = cov_ij / (self.std_dev*std_dev_j)
-            self.correlation[j] = corr_ij
+            corr_ij = cov_ij / (self.std_dev[index]*std_dev_j)
+            self.correlations_history[j].append(corr_ij)
 
     # Updates the value of rentability and return
     # To update the value of return we subtract the element that's going to "leave"
     #   the deque rentability and sum the added value of rentability
-    def update_rentability(self):
-        old_value = self.rentability[0]
-        new_value = self.log_close_data[Stock.n_ticks-1] - self.log_close_data[Stock.n_ticks-2]
-        self.rentability.append(new_value)
-        self.rtn = self.rtn + (new_value-old_value) / (Stock.n_ticks - 1)
+    def update_rentability(self, index):
+        old_value = self.curr_rentability[0]
+        new_value = self.rentability[Stock.n_ticks+index-2]
+        self.curr_rentability.append(new_value)
+        self.rtn.append( self.rtn[index-1] + ((new_value-old_value) / (Stock.n_ticks - 1)))
     
     # Get the current close data
     def webscrape_close(self):
@@ -145,40 +160,55 @@ class Stock:
         self.close_data.append(close_value)
         self.log_close_data.append(math.log(close_value))
 
-    def init_metrics(self):
-        self.calc_rentability()
-        self.calc_return()
-        self.calc_deviations()
-        self.calc_risk()
-
     # Updates the values:
         # close, log_close
         # rentability, rtn
         # deviations
         # variance, standard_deviation, coeficient of variation
-    def update_data(self):
+    def update_metrics_realtime(self):
         self.add_close()
-        self.update_rentability()
-        self.calc_deviations()
-        self.calc_risk()
+        self.update_rentability(Stock.n_windows-1)
+        self.calc_deviations(Stock.n_windows-1)
+        self.calc_risk(Stock.n_windows-1)
 
     def check_market_status(self):
         history_url = "https://finance.yahoo.com/quote/" + self.symbol + "/history?p=" + self.symbol #concatenação de strings para obter a webpage da respetiva stock
         doc = self.webscrape_page(history_url)                     # Webscrapes the page
-        if doc == 2:
+        if doc == 1:
+            raise ValueError("Didn't find the Stock: " + symbol + "\n")
+        elif doc == 2:
             raise ValueError("Didn't find the Stock : " + self.symbol + "\n")
-        if doc == 3:
+        elif doc == 3:
             raise ValueError("Due the high frequency of webscraping couldn't webscrape the Stock Symbol: " + self.symbol + ", you should try again after some time\n")
-        text = doc.find_all("div", {"id": "quote-market-notice"})
-        print(text)
-        market_state = ( str(text).replace(".</span></div>]","") ).split(". ")
-        print(market_state)
-        if len(market_state) == 2:  #analisar melhor as condições no sentido a  retirar o if possiblidade de iniciar com "Market open"
-            self.prev_market_state == "Market Open"
-            return 1                                                                         # Está aberto
-        elif self.prev_market_state == "Market Open":                                        # This is the case where it manages to successfully webscrape "Market Open"
-        #if (self.prev_market_state == "Market Open" & market_state != self.market_state):
-            self.prev_market_state = "Market Close"
-            return 0                                                    #passa de aberto para fechado
         else:
-            return 2
+            text = doc.find_all("div", {"id": "quote-market-notice"})
+            print(text)
+            market_state = ( str(text).replace(".</span></div>]","") ).split(". ")
+            print(market_state)
+            if len(market_state) == 2:  #analisar melhor as condições no sentido a  retirar o if possiblidade de iniciar com "Market open"
+                self.prev_market_state == "Market Open"
+                return 1                                                                         # Está aberto
+            elif self.prev_market_state == "Market Open":                                        # This is the case where it manages to successfully webscrape "Market Open"
+            #if (self.prev_market_state == "Market Open" & market_state != self.market_state):
+                self.prev_market_state = "Market Close"
+                return 0                                                    #passa de aberto para fechado
+            else:
+                return 2
+
+    def get_deviations(self):
+        return self.deviations
+
+    def set_index(self, index):
+        ([self.curr_rentability.append(self.rentability[i]) for i in range(index, self.n_ticks + index - 1) ])
+        self.calc_deviations(index)
+        
+    def add_corr_space(self):
+        self.correlations_history.append(deque(maxlen=Stock.n_windows))
+
+    def set_last_correlation(self):
+        t = 0
+        for value in self.correlations_history[1]:
+            t +=1
+        print("t: ", t)
+        print("corr_history: ", self.correlations_history)
+        self.correlation = [corr[Stock.n_windows-1] for corr in self.correlations_history]
