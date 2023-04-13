@@ -20,6 +20,7 @@ import requests
 import bs4
 from PIL import Image # To use images on the app
 
+import collections
 
 import matplotlib
 matplotlib.use("TkAgg")
@@ -195,13 +196,14 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
         else:
             self.info_window.focus()
 
+# Table for correlation heatmap
 class UI_Table(tk.Tk):
     def __init__(self, main_window, **kw):
         self.table = Sheet(main_window)
         self.table.change_theme("dark")
         self.table.grid(row=0, column=0, sticky="nsew")
         self.heatmap_colors = ["#90083A", "#C93545", "#EE5F40", "#FAA15B", "#FED885", "#FEFDBA", "#E6EF92", "#A6D59E", "#63B99C", "#2D80B2", "#504A94"]
-        self.heatmap_intervals = [-0.85, -0.7, -0.5, -0.3, -0.1, 0.1, 0.3, 0.5, 0.7, 0.85]
+        self.heatmap_intervals = [-0.85, -0.75, -0.65, -0.45, -0.3, 0.3, 0.45, 0.65, 0.75, 0.85]
         self.n_colors = len(self.heatmap_colors)
 
     def update_columns(self, headers): #pode ser otimizado
@@ -222,6 +224,7 @@ class UI_Table(tk.Tk):
     def update_index(self):
         self.table.row_index(newindex = self.table.headers(), index = None, reset_row_positions = False, show_index_if_not_sheet = True, redraw = False)
 
+    # color the table
     def heat_map(self):
         num_columns = len(self.table.headers())
         num_rows = self.table.get_total_rows()
@@ -351,15 +354,18 @@ class App(ctk.CTk):
 
         self.correlations_table = UI_Table(self.correlations_frame)
 
+        # Side bar anomalies button
         self.anomalies_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Anomalies",
                                                    fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
                                                    anchor="w", command=self.anomalies_button_event)
         
         self.anomalies_button.grid(row=2, column=0, sticky="ew")
+        # Anomalies frame
         self.anomalies_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.anomalies_frame.rowconfigure(0, weight=0)
         self.anomalies_frame.columnconfigure((0,1), weight=0)
         self.anomalies_frame.columnconfigure(2, weight=1)
+        # Combo boxes to select stock anomalies
         self.combobox_1 = ctk.CTkComboBox(self.anomalies_frame, command=self.combobox_callback, width=120)
         self.combobox_1.grid(row=0, column = 0, padx=(10,10), pady=(10,10))
         self.combobox_2 = ctk.CTkComboBox(self.anomalies_frame, command=self.combobox_callback, width=120)
@@ -419,13 +425,15 @@ class App(ctk.CTk):
             self.combobox_2.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var2)
         self.select_frame_by_name("anomalies")
 
+    # Function to get combo boxes Symbols
     def combobox_callback(self, choice):
         symbol_1 = self.combobox_1.get()
         symbol_2 = self.combobox_2.get()
         if symbol_1 != symbol_2:
-            self.iqr_anomaly_detector(symbol_1, symbol_2)
+            labels, index_1, index_2 = self.iqr_anomaly_detector(symbol_1, symbol_2)
+            self.plot_anomalies(labels, self.stocks_array[index_1].correlations_history[index_2], symbol_1, symbol_2)
 
-    # Create the plot graphic
+    # Create the plot graphic for anomalies
     def plot_anomalies(self, labels, values, symbol_1, symbol_2):
         self.anomalies_plot_fig.clf()
         ax = self.anomalies_plot_fig.add_subplot(111)
@@ -546,11 +554,14 @@ class App(ctk.CTk):
         if i == j:
             self.stocks_array[i].correlations_history[j].append(1)
         else:
-            result = self.stocks_array[i].calc_correlation(j, self.stocks_array[j].get_deviations(), self.stocks_array[j].std_dev[k], k)
+            result, index = self.stocks_array[i].calc_correlation(j, self.stocks_array[j].get_deviations(), self.stocks_array[j].std_dev[k], k)
             self.stocks_array[j].correlations_history[i].append(self.stocks_array[i].correlations_history[j][k])
             if result == 1:                                 # Tells the user that the values of a stock remained static
                 self.output_textbox.configure(state="normal")
-                self.output_textbox.insert(ctk.END, "The close values of " + self.symbols_lst[i] + "are exactly the same over the time period\n")
+                if index == -1:
+                    self.output_textbox.insert(ctk.END, "The close values of " + self.symbols_lst[i] + " are exactly the same over the time period\n")
+                else:
+                    self.output_textbox.insert(ctk.END, "The close values of " + self.symbols_lst[j] + " are exactly the same over the time period\n")
                 self.output_textbox.configure(state="disabled")
         x = list(itertools.islice(self.stocks_array[i].rentability, k, Stock.n_ticks-1+k))
         y = list(itertools.islice(self.stocks_array[j].rentability, k, Stock.n_ticks-1+k))
@@ -602,6 +613,12 @@ class App(ctk.CTk):
                 for j in range(i, self.n_symbols):
                     self.calc_correlation(i,j,Stock.n_windows-1)
 
+            for i in range(self.n_symbols):
+                for j in range(i+1, self.n_symbols):
+                    labels, index_1, index_2 = self.iqr_anomaly_detector(self.symbols_lst[i],self.symbols_lst[j])
+                    if labels[-1] == 1:
+                        tk.messagebox.showinfo("Anomaly","Anomaly on the correlation of stocks: ", self.symbols_lst[i], " and ", self.symbols_lst[j])
+
             
     # Removes stock from lists
     def remove_stock(self, idx):
@@ -613,27 +630,31 @@ class App(ctk.CTk):
             self.stocks_array[i].correlation.pop(idx)
             self.stocks_array[i].correlations_history.pop(idx)
 
-
+    #  Label anomalies
     def find_anomalies(self, value, lower_threshold, upper_threshold):
         if value < lower_threshold or value > upper_threshold:
             return 1
         else: 
             return 0
 
-    def iqr_anomaly_detector(self, symbol_1, symbol_2, threshold=1.1):
+    # Interquartile range for anomalies
+    def iqr_anomaly_detector(self, symbol_1, symbol_2, threshold=0.5):
         index_1 = self.symbols_lst.index(symbol_1)
         index_2 = self.symbols_lst.index(symbol_2)
         idx_quartile_1 = int(Stock.n_windows*0.25)
         idx_quartile_3 = int(Stock.n_windows*0.75)
-        quartile_1 = self.stocks_array[index_1].correlations_history[index_2][idx_quartile_1]
-        quartile_3 = self.stocks_array[index_1].correlations_history[index_2][idx_quartile_3]
+        sorted_data = list(collections.deque(self.stocks_array[index_1].correlations_history[index_2]))
+        sorted_data.sort()
+        quartile_1 = sorted_data[idx_quartile_1]
+        quartile_3 = sorted_data[idx_quartile_3]
         iqr = quartile_3 - quartile_1
 
         lower_threshold = quartile_1 - (threshold * iqr)
         upper_threshold = quartile_3 + (threshold * iqr)
 
-        labels = [self.find_anomalies(value, quartile_1, quartile_3) for value in self.stocks_array[index_1].correlations_history[index_2]]
-        self.plot_anomalies(labels, self.stocks_array[index_1].correlations_history[index_2], symbol_1, symbol_2)
+        labels = [self.find_anomalies(value, lower_threshold, upper_threshold) for value in self.stocks_array[index_1].correlations_history[index_2]]
+        return labels, index_1, index_2
+        
         
 
 if __name__ == "__main__":

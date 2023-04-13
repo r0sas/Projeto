@@ -127,14 +127,18 @@ class Stock:
 
         # Calculate the correlation of this stock and another
     def calc_correlation(self, j, deviations_j, std_dev_j, index):
-        if (self.rtn == 0):                                             # Case of stock price being static
-            self.correlation[j] = corr_ij
-            return 1
+        if self.std_dev[index] == 0:                                             # Case of stock price being static
+            self.correlations_history[j].append(0)
+            return 1, -1
+        elif std_dev_j == 0:
+            self.correlations_history[j].append(0)
+            return 1, j
         else:
             cov_ij = sum(value_i * value_j for value_i, value_j 
                          in zip(self.deviations, deviations_j)) / (Stock.n_ticks-2)
             corr_ij = cov_ij / (self.std_dev[index]*std_dev_j)
             self.correlations_history[j].append(corr_ij)
+            return 0, 0
 
     # Updates the value of rentability and return
     # To update the value of return we subtract the element that's going to "leave"
@@ -175,7 +179,7 @@ class Stock:
         history_url = "https://finance.yahoo.com/quote/" + self.symbol + "/history?p=" + self.symbol #concatenação de strings para obter a webpage da respetiva stock
         doc = self.webscrape_page(history_url)                     # Webscrapes the page
         if doc == 1:
-            raise ValueError("Didn't find the Stock: " + symbol + "\n")
+            raise ValueError("Didn't find the Stock: " + self.symbol + "\n")
         elif doc == 2:
             raise ValueError("Didn't find the Stock : " + self.symbol + "\n")
         elif doc == 3:
