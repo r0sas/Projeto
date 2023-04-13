@@ -1,3 +1,4 @@
+from ast import Try
 import bs4
 import requests
 import math
@@ -39,6 +40,8 @@ class Stock:
             raise ValueError("Due the high frequency of webscraping couldn't webscrape the Stock: " + symbol + ", you should try again after some time\n")
         elif result == 3:
             raise ValueError("Didn't gather enough data for the Stock Symbol: " + symbol + "\n")
+        elif result == 4:
+            raise ValueError("Max retries exceeded for " + symbol + "\n")
         else:
             self.close_data.reverse()
             self.log_close_data.reverse()
@@ -48,15 +51,18 @@ class Stock:
     # Get webpage code
     def webscrape_page(self,url):
         """Download a webpage and return a beautiful soup doc"""
-        response = requests.get(url, headers={'User-Agent': 'Custom'}) # to try and pass as a person accessing the website
-        if response.history:
-            return 1
-        if not response.ok:
-            print('Status code:', response.status_code)
-            return 2
-        page_content = response.text
-        doc = bs4.BeautifulSoup(page_content, 'html.parser')
-        return doc
+        try: 
+            response = requests.get(url, headers={'User-Agent': 'Custom'}) # to try and pass as a person accessing the website
+            if response.history:
+                return 1
+            if not response.ok:
+                print('Status code:', response.status_code)
+                return 2
+            page_content = response.text
+            doc = bs4.BeautifulSoup(page_content, 'html.parser')
+            return doc
+        except:
+            return 4
 
     # Get the past n_ticks close values 
     def init_close(self):
@@ -210,9 +216,4 @@ class Stock:
         self.correlations_history.append(deque(maxlen=Stock.n_windows))
 
     def set_last_correlation(self):
-        t = 0
-        for value in self.correlations_history[1]:
-            t +=1
-        print("t: ", t)
-        print("corr_history: ", self.correlations_history)
         self.correlation = [corr[Stock.n_windows-1] for corr in self.correlations_history]

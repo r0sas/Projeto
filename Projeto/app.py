@@ -251,6 +251,7 @@ class App(ctk.CTk):
         self.stocks_array = []
         self.n_symbols = 0
         self.n_stocks_added = 0
+        self.textbox_n_lines = 0
         background_update_thread = th.Thread(target=self.background_close_value_update)
         background_update_thread.setDaemon(True)
         background_update_thread.start()
@@ -407,13 +408,14 @@ class App(ctk.CTk):
     # Function triggered by the frame correlations_button
         # It will add columns and rows to the correlation table
     def correlations_button_event(self):
-        self.correlations_table.update_columns(self.symbols_lst)
-        for stock in self.stocks_array:
-            correlation_data = [ '%.2f' % elem for elem in stock.correlation ]
-            self.correlations_table.insert_row(correlation_data)
-        self.correlations_table.update_index()
-        self.correlations_table.heat_map()
-        self.select_frame_by_name("correlations")
+        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread):
+            self.correlations_table.update_columns(self.symbols_lst)
+            for stock in self.stocks_array:
+                correlation_data = [ '%.2f' % elem for elem in stock.correlation ]
+                self.correlations_table.insert_row(correlation_data)
+            self.correlations_table.update_index()
+            self.correlations_table.heat_map()
+            self.select_frame_by_name("correlations")
 
     def anomalies_button_event(self):
         combobox_var1 = ctk.StringVar(value=self.stocks_array[0].symbol)  # set initial value
@@ -508,9 +510,10 @@ class App(ctk.CTk):
         except ValueError as e:                                     # If there's an error it shows the error to the user
             self.n_symbols -= 1
             Stock.n_stocks = self.n_symbols
-            self.output_textbox.configure(state="normal")
-            self.output_textbox.insert(ctk.END, str(e))
-            self.output_textbox.configure(state="disabled")
+            #self.output_textbox.configure(state="normal")
+            #self.output_textbox.insert(ctk.END, str(e))
+            #self.output_textbox.configure(state="disabled")
+            self.insert_text(str(e))
             return 0                                                # failure
                   
     # Function triggered by the correlationn button
@@ -518,12 +521,11 @@ class App(ctk.CTk):
         while (self.add_thread or self.update_stocks_thread or self.init_thread):
             time.sleep(1)
         self.init_thread = True
-        t = th.Thread(target=self.init_metrics)
-        t.setDaemon(True)
-        t.start()
-        self.output_textbox.configure(state="normal")
-        self.output_textbox.insert(ctk.END, "The correlation is finished\n")
-        self.output_textbox.configure(state="disabled")
+        self.init_metrics()
+        #self.output_textbox.configure(state="normal")
+        #self.output_textbox.insert(ctk.END, "The correlation is finished\n")
+        #self.output_textbox.configure(state="disabled")
+        self.insert_text("The correlation is finished\n")
         self.init_thread = False
 
     # Calculates the correlation of stocks
@@ -557,12 +559,14 @@ class App(ctk.CTk):
             result, index = self.stocks_array[i].calc_correlation(j, self.stocks_array[j].get_deviations(), self.stocks_array[j].std_dev[k], k)
             self.stocks_array[j].correlations_history[i].append(self.stocks_array[i].correlations_history[j][k])
             if result == 1:                                 # Tells the user that the values of a stock remained static
-                self.output_textbox.configure(state="normal")
+                #self.output_textbox.configure(state="normal")
                 if index == -1:
-                    self.output_textbox.insert(ctk.END, "The close values of " + self.symbols_lst[i] + " are exactly the same over the time period\n")
+                    #self.output_textbox.insert(ctk.END, "The close values of " + self.symbols_lst[i] + " are exactly the same over the time period\n")
+                    self.insert_text("The close values of " + self.symbols_lst[i] + " are exactly the same over the time period\n")
                 else:
-                    self.output_textbox.insert(ctk.END, "The close values of " + self.symbols_lst[j] + " are exactly the same over the time period\n")
-                self.output_textbox.configure(state="disabled")
+                    #self.output_textbox.insert(ctk.END, "The close values of " + self.symbols_lst[j] + " are exactly the same over the time period\n")
+                    self.insert_text("The close values of " + self.symbols_lst[j] + " are exactly the same over the time period\n")
+                #self.output_textbox.configure(state="disabled")
         x = list(itertools.islice(self.stocks_array[i].rentability, k, Stock.n_ticks-1+k))
         y = list(itertools.islice(self.stocks_array[j].rentability, k, Stock.n_ticks-1+k))
         z, _ = pearsonr(x, y)
@@ -590,7 +594,7 @@ class App(ctk.CTk):
             self.update_stocks_thread = False
             print("Minutes till next update: " + str(min_til))
             time.sleep(sec_til)
-            while ((self.add_thread != False) and (self.init_thread != False)):
+            while ((self.add_thread != False) or (self.init_thread != False)):
                 print("Sleeping")
                 time.sleep(1)
             self.update_stocks_thread = True
@@ -599,15 +603,19 @@ class App(ctk.CTk):
                     status = stock.check_market_status()            # check the if the market changed from close->open or open->close
                     print(status)
                     if status == 0:
-                        self.output_textbox.configure(state="normal")
-                        self.output_textbox.insert(ctk.END, "Updated the value of the Stock " + stock.symbol + ", (" + str(stock.close_data[0])+ "," + str(stock.close_data[self.n_ticks-1]) + ")")
+                        #self.output_textbox.configure(state="normal")
+                        #self.output_textbox.insert(ctk.END, "Updated the value of the Stock " + stock.symbol + ", (" + str(stock.close_data[0])+ "," + str(stock.close_data[self.n_ticks-1]) + ")")
+                        #stock.update_metrics_realtime()
+                        #self.output_textbox.insert(ctk.END, " -> (" + str(stock.close_data[0]) + "," + str(stock.close_data[self.n_ticks-1]) + ")\n")
+                        #self.output_textbox.configure(state="disabled")
+                        self.insert_text("Updated the value of the Stock " + stock.symbol + ", (" + str(stock.close_data[0])+ "," + str(stock.close_data[self.n_ticks-1]) + ")")
                         stock.update_metrics_realtime()
-                        self.output_textbox.insert(ctk.END, " -> (" + str(stock.close_data[0]) + "," + str(stock.close_data[self.n_ticks-1]) + ")\n")
-                        self.output_textbox.configure(state="disabled")
+                        self.insert_text( " -> (" + str(stock.close_data[0]) + "," + str(stock.close_data[self.n_ticks-1]) + ")\n")
                 except ValueError as e:  
-                        self.output_textbox.configure(state="normal")
-                        self.output_textbox.insert(ctk.END, str(e))
-                        self.output_textbox.configure(state="disabled")
+                    self.insert_text(str(e))
+                    #self.output_textbox.configure(state="normal")
+                    #self.output_textbox.insert(ctk.END, str(e))
+                    #self.output_textbox.configure(state="disabled")
 
             for i in range(self.n_symbols):
                 for j in range(i, self.n_symbols):
@@ -617,7 +625,7 @@ class App(ctk.CTk):
                 for j in range(i+1, self.n_symbols):
                     labels, index_1, index_2 = self.iqr_anomaly_detector(self.symbols_lst[i],self.symbols_lst[j])
                     if labels[-1] == 1:
-                        tk.messagebox.showinfo("Anomaly","Anomaly on the correlation of stocks: ", self.symbols_lst[i], " and ", self.symbols_lst[j])
+                        tk.messagebox.showinfo("Anomaly","Anomaly on the correlation of stocks: " + self.symbols_lst[i] + " and " + self.symbols_lst[j])
 
             
     # Removes stock from lists
@@ -629,6 +637,25 @@ class App(ctk.CTk):
         for i in range(self.n_symbols):                             # Remove the other stocks correlations with the stock removed
             self.stocks_array[i].correlation.pop(idx)
             self.stocks_array[i].correlations_history.pop(idx)
+
+    def insert_text(self,text):
+        self.output_textbox.configure(state="normal")
+        if self.textbox_n_lines > 10:
+            contents = self.output_textbox.get('1.0', 'end')
+            lines = contents.split('\n')
+            del lines[0]
+            if lines[-1] == '':
+                del lines[-1]
+            line_end_index = self.output_textbox.index('1.end')
+            new_contents = '\n'.join(lines)
+            self.output_textbox.delete('1.0', 'end')
+            self.output_textbox.insert('1.0', new_contents)
+            #self.output_textbox.delete("1.0", line_end_index)
+            self.textbox_n_lines -= 1
+        self.output_textbox.insert(ctk.END, text)
+        self.output_textbox.configure(state="disabled")
+        self.textbox_n_lines += 1
+
 
     #  Label anomalies
     def find_anomalies(self, value, lower_threshold, upper_threshold):
