@@ -37,7 +37,7 @@ class Stock:
         if result == 1:
             raise ValueError("Didn't find the Stock: " + symbol + "\n")
         elif result == 2:
-            raise ValueError("Due the high frequency of webscraping couldn't webscrape the Stock: " + symbol + ", you should try again after some time\n")
+            raise ValueError("Due the high frequency of webscraping couldn't fetch data for: " + symbol + ", you should try again after some time\n")
         elif result == 3:
             raise ValueError("Didn't gather enough data for the Stock Symbol: " + symbol + "\n")
         elif result == 4:
@@ -68,7 +68,7 @@ class Stock:
     def init_close(self):
         history_url = "https://finance.yahoo.com/quote/" + self.symbol + "/history?p=" + self.symbol #concatenação de strings para obter a webpage da respetiva stock
         doc = self.webscrape_page(history_url)                     #obter dados da página
-        if doc == 1 or doc == 2:
+        if doc == 1 or doc == 2 or doc == 4:
             return doc
         table_body = doc.find('tbody')                  #selecionar tabela de dados
         rows = table_body.find_all('tr')                #selecionar colunas
@@ -188,8 +188,8 @@ class Stock:
             raise ValueError("Didn't find the Stock: " + self.symbol + "\n")
         elif doc == 2:
             raise ValueError("Didn't find the Stock : " + self.symbol + "\n")
-        elif doc == 3:
-            raise ValueError("Due the high frequency of webscraping couldn't webscrape the Stock Symbol: " + self.symbol + ", you should try again after some time\n")
+        elif doc == 4:
+            raise ValueError("Due the high frequency of webscraping couldn't fetch data for: " + self.symbol + ", you should try again after some time\n")
         else:
             text = doc.find_all("div", {"id": "quote-market-notice"})
             print(text)

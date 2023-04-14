@@ -19,6 +19,7 @@ import os
 import requests
 import bs4
 from PIL import Image # To use images on the app
+from sklearn.neighbors import LocalOutlierFactor
 
 import collections
 
@@ -279,7 +280,7 @@ class App(ctk.CTk):
         # Side bar home button
         self.home_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Home",
                                                    fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
-                                                   image=self.home_logo_image, anchor="w", command=self.home_button_event)
+                                                    anchor="w", command=self.home_button_event)
         self.home_button.grid(row=0, column=0, sticky="ew")
 
         # Home frame
@@ -297,26 +298,25 @@ class App(ctk.CTk):
                                                 command=self.add_stocks_event, width=50)
         self.add_symbols_btn.grid(row=0, column=2, padx=(10, 10), pady=(10, 10), sticky="nsew")
 
+        # Search symbol entry
+        self.search_bar_stocks = ctk.CTkEntry(self.home_frame, placeholder_text = "Search (ex: TSLA)", width=180)
+        self.search_bar_stocks.grid(row=1, column=0, columnspan=2, padx=(10, 0), pady=(10, 10), sticky="nsew")
+
+        # Search symbol button
+        self.search_symbols_btn = ctk.CTkButton(self.home_frame, text="Search", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"),
+                                                 command=self.search_symbols, width=50)
+        self.search_symbols_btn.grid(row=1, column=2, padx=(10, 10), pady=(10, 10), sticky="nsew")
 
         # Scrollable Checkbox Symbols
         self.scrollable_checkbox_frame = ScrollableCheckBoxFrame(self.home_frame, command=self.checkbox_frame_event,
                                                                  item_list=[], width=280)
         self.scrollable_checkbox_frame.grid(row=2, rowspan=1, column=0, columnspan=3 ,padx=(10,10), pady=(0,0), sticky="nsew")
 
-        # Search symbol entry
-        self.search_bar_stocks = ctk.CTkEntry(self.home_frame, placeholder_text = "Search (ex: TSLA)", width=180)
-        self.search_bar_stocks.grid(row=1, column=0, columnspan=1, padx=(10, 0), pady=(10, 10), sticky="nsew")
-
-        # Search symbol button
-        self.search_symbols_btn = ctk.CTkButton(self.home_frame, text="Search", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"),
-                                                 command=self.search_symbols, width=50)
-        self.search_symbols_btn.grid(row=1, column=1, padx=(10, 10), pady=(10, 10), sticky="nsew")
-
         # Correlate Button
-        self.correlate_btn = ctk.CTkButton(master=self.home_frame, text="Correlate", fg_color="transparent", border_width=2,
-                                          text_color=("gray10", "#DCE4EE"), width=50)
+        #self.correlate_btn = ctk.CTkButton(master=self.home_frame, text="Correlate", fg_color="transparent", border_width=2,
+        #                                  text_color=("gray10", "#DCE4EE"), width=50)
 
-        self.correlate_btn.grid(row=1, column=2, padx=(0, 10), pady=(10, 10), sticky="w")
+        #self.correlate_btn.grid(row=1, column=2, padx=(0, 10), pady=(10, 10), sticky="w")
 
         # Output text box
         self.output_textbox = ctk.CTkTextbox(self.home_frame)
@@ -408,7 +408,7 @@ class App(ctk.CTk):
     # Function triggered by the frame correlations_button
         # It will add columns and rows to the correlation table
     def correlations_button_event(self):
-        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread):
+        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread) and (self.n_symbols > 0):
             self.correlations_table.update_columns(self.symbols_lst)
             for stock in self.stocks_array:
                 correlation_data = [ '%.2f' % elem for elem in stock.correlation ]
@@ -418,21 +418,22 @@ class App(ctk.CTk):
             self.select_frame_by_name("correlations")
 
     def anomalies_button_event(self):
-        combobox_var1 = ctk.StringVar(value=self.stocks_array[0].symbol)  # set initial value
-        self.combobox_1.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var1)
-        if self.n_symbols <= 1:
-            self.combobox_2.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var1)
-        else:
-            combobox_var2 = ctk.StringVar(value=self.stocks_array[1].symbol)  # set initial value
-            self.combobox_2.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var2)
-        self.select_frame_by_name("anomalies")
+        if (self.n_symbols > 0):
+            combobox_var1 = ctk.StringVar(value=self.stocks_array[0].symbol)  # set initial value
+            self.combobox_1.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var1)
+            if self.n_symbols <= 1:
+                self.combobox_2.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var1)
+            else:
+                combobox_var2 = ctk.StringVar(value=self.stocks_array[1].symbol)  # set initial value
+                self.combobox_2.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var2)
+            self.select_frame_by_name("anomalies")
 
     # Function to get combo boxes Symbols
     def combobox_callback(self, choice):
         symbol_1 = self.combobox_1.get()
         symbol_2 = self.combobox_2.get()
         if symbol_1 != symbol_2:
-            labels, index_1, index_2 = self.iqr_anomaly_detector(symbol_1, symbol_2)
+            labels, index_1, index_2 = self.anomaly_detector(symbol_1, symbol_2)
             self.plot_anomalies(labels, self.stocks_array[index_1].correlations_history[index_2], symbol_1, symbol_2)
 
     # Create the plot graphic for anomalies
@@ -598,6 +599,7 @@ class App(ctk.CTk):
                 print("Sleeping")
                 time.sleep(1)
             self.update_stocks_thread = True
+            stocks_updated = []
             for stock in self.stocks_array:
                 try:
                     status = stock.check_market_status()            # check the if the market changed from close->open or open->close
@@ -611,21 +613,28 @@ class App(ctk.CTk):
                         self.insert_text("Updated the value of the Stock " + stock.symbol + ", (" + str(stock.close_data[0])+ "," + str(stock.close_data[self.n_ticks-1]) + ")")
                         stock.update_metrics_realtime()
                         self.insert_text( " -> (" + str(stock.close_data[0]) + "," + str(stock.close_data[self.n_ticks-1]) + ")\n")
+                        stocks_updated.append(self.symbols_lst.index(stock.symbol))
                 except ValueError as e:  
                     self.insert_text(str(e))
                     #self.output_textbox.configure(state="normal")
                     #self.output_textbox.insert(ctk.END, str(e))
                     #self.output_textbox.configure(state="disabled")
 
-            for i in range(self.n_symbols):
-                for j in range(i, self.n_symbols):
-                    self.calc_correlation(i,j,Stock.n_windows-1)
+            for i in stocks_updated:
+                for j in range(self.n_symbols):
+                    if j > i and (j in stocks_updated):
+                        pass
+                    else:
+                        self.calc_correlation(i,j,Stock.n_windows-1)
 
-            for i in range(self.n_symbols):
-                for j in range(i+1, self.n_symbols):
-                    labels, index_1, index_2 = self.iqr_anomaly_detector(self.symbols_lst[i],self.symbols_lst[j])
-                    if labels[-1] == 1:
-                        tk.messagebox.showinfo("Anomaly","Anomaly on the correlation of stocks: " + self.symbols_lst[i] + " and " + self.symbols_lst[j])
+            for i in stocks_updated:
+                for j in range(self.n_symbols):
+                    if j > i and (j in stocks_updated):
+                        pass
+                    else:
+                        labels, index_1, index_2 = self.iqr_anomaly_detector(self.symbols_lst[stocks_updated[i]],self.symbols_lst[stocks_updated[j]])
+                        if labels[-1] == 1:
+                            tk.messagebox.showinfo("Anomaly","Anomaly on the correlation of stocks: " + self.symbols_lst[stocks_updated[i]] + " and " + self.symbols_lst[stocks_updated[j]])
 
             
     # Removes stock from lists
@@ -640,7 +649,7 @@ class App(ctk.CTk):
 
     def insert_text(self,text):
         self.output_textbox.configure(state="normal")
-        if self.textbox_n_lines > 10:
+        if self.textbox_n_lines > 100:
             contents = self.output_textbox.get('1.0', 'end')
             lines = contents.split('\n')
             del lines[0]
@@ -682,7 +691,48 @@ class App(ctk.CTk):
         labels = [self.find_anomalies(value, lower_threshold, upper_threshold) for value in self.stocks_array[index_1].correlations_history[index_2]]
         return labels, index_1, index_2
         
-        
+
+    def anomaly_detector(self, symbol_1, symbol_2):
+        index_1 = self.symbols_lst.index(symbol_1)
+        index_2 = self.symbols_lst.index(symbol_2)
+        data = list(collections.deque(self.stocks_array[index_1].correlations_history[index_2]))
+        lof_anomalies = self.LOF_anomaly_detector(data)
+        mad_anomalies = self.MAD_anomaly_detector(data)
+        print("LOF anomalies: ", lof_anomalies)
+        print("MAD anomalies: ", mad_anomalies)
+        both_anomalies = [index for index in lof_anomalies if index in mad_anomalies]
+        print("Both anomalies: ", both_anomalies)
+        labels = [0] * Stock.n_windows
+        for index in both_anomalies:
+            labels[index] = 1
+        return labels, index_1, index_2
+
+    def LOF_anomaly_detector(self, data):
+        k = 5
+        # Calculate the LOF
+        data = np.array(data)
+        data = data.reshape(-1,1)
+        lof = LocalOutlierFactor(n_neighbors=k)
+        lof.fit(data)
+        lof_scores = -lof.negative_outlier_factor_
+        # Choose the threshold for anomalies
+        threshold = 1.5
+        # Find the anomalies
+        anomalies = np.where(lof_scores > threshold)[0]
+        return anomalies
+
+    def MAD_anomaly_detector(self, data):
+        # Calculate the median
+        median = np.median(data)
+        # Calculate the median absolute deviation (MAD)
+        mad = np.median(np.abs(data - median))
+        # Set the threshold for anomalies
+        threshold = 2.5
+        # Calculate the distances from the median in units of MADs
+        distances = np.abs(data - median) / mad
+        # Find the anomalies
+        anomalies = np.where(distances > threshold)[0]
+        return anomalies
 
 if __name__ == "__main__":
     app = App()
