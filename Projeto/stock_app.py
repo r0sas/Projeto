@@ -112,12 +112,12 @@ class Stock:
         # calculate variance
         # calculate standard deviation
     def calc_risk(self, index):
-        if self.rtn[index] == 0:                                               # Case of stock price is static
-            self.variance.append(0)
-            self.std_dev.append(0)
-        else:
+        try:
             self.variance.append(sum(value**2 for value in self.deviations) / (Stock.n_ticks-2))
             self.std_dev.append(math.sqrt(self.variance[index]))
+        except:
+            self.variance.append(0)
+            self.std_dev.append(0)
 
     def init_metrics(self):
         self.calc_rentability()

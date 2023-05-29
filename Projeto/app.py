@@ -6,6 +6,9 @@ import numpy as np
 import itertools
 from scipy.stats import pearsonr
 
+from scipy.spatial.distance import squareform
+import networkx as nx
+
 
 from tksheet import Sheet
 import threading as th
@@ -13,6 +16,7 @@ import tkinter as tk
 import tkinter.messagebox
 from tkinter import ttk
 import customtkinter as ctk
+import math
 
 import time
 import os
@@ -289,6 +293,7 @@ class App(ctk.CTk):
         self.home_frame.grid_rowconfigure((2, 3), weight=1)
         self.home_frame.grid_rowconfigure((0, 1), weight=0)
 
+
         # Symbols entry
         self.entry_stocks = ctk.CTkEntry(self.home_frame, placeholder_text = "Stocks (ex: TSLA, AMZN, META)", width=230)
         self.entry_stocks.grid(row=0, column=0, columnspan=2, padx=(10, 0), pady=(10, 10), sticky="nsew")
@@ -378,6 +383,31 @@ class App(ctk.CTk):
         self.anomalies_canvas = FigureCanvasTkAgg(self.anomalies_plot_fig, master=self.anomalies_frame)
         self.anomalies_canvas.get_tk_widget().grid(row=1, column=0, columnspan=3, sticky = "nsew")
 
+        # Side bar PMFG button
+        self.pmfg_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="PMFG",
+                                                   fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
+                                                   anchor="w", command=self.pmfg_button_event)
+        self.pmfg_button.grid(row=3, column=0, sticky="ew")
+        # PMFG frame
+        self.pmfg_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.pmfg_frame.rowconfigure(0, weight=1)
+        self.pmfg_frame.columnconfigure(0, weight=1)
+
+        # PMFG plot
+        self.pmfg_plot_fig = Figure(figsize=(5,5), dpi=100)
+        self.pmfg_plot_fig.patch.set_facecolor('#242424')
+        self.pmfg_canvas = FigureCanvasTkAgg(self.pmfg_plot_fig, master=self.pmfg_frame)
+        self.pmfg_canvas.get_tk_widget().grid(row=1, column=0, columnspan=3, sticky = "nsew")
+        # Create a toolbar and grid it onto the app
+        toolbar = NavigationToolbar2Tk(self.pmfg_canvas, self.pmfg_frame, pack_toolbar=False)
+        toolbar.grid(row=0, column=0)
+        #toolbar.setStyleSheet("background-color:Gray14;")
+        toolbar.config(bg='#242424')
+        toolbar._message_label.config(background='#242424')
+        toolbar._message_label.config(foreground='#FFFFFF')
+        toolbar.update()
+
+
         # Start the app on the home frame
         self.select_frame_by_name("home")
 
@@ -386,6 +416,7 @@ class App(ctk.CTk):
         self.home_button.configure(fg_color=("gray75", "gray25") if name == "home" else "transparent")
         self.correlations_button.configure(fg_color=("gray75", "gray25") if name == "correlations" else "transparent")
         self.anomalies_button.configure(fg_color=("gray75", "gray25") if name == "anomalies" else "transparent")
+        self.pmfg_button.configure(fg_color=("gray75", "gray25") if name == "pmfg" else "transparent")
 
         # show selected frame
         if name == "home":
@@ -400,6 +431,10 @@ class App(ctk.CTk):
             self.anomalies_frame.grid(row=0, rowspan=4, column=1, sticky="nsew")
         else:
             self.anomalies_frame.grid_forget()
+        if name == "pmfg":
+            self.pmfg_frame.grid(row=0, rowspan=4, column=1, sticky="nsew")
+        else:
+            self.pmfg_frame.grid_forget()
 
     # Function triggered by the frame home button
     def home_button_event(self):
@@ -428,6 +463,18 @@ class App(ctk.CTk):
                 self.combobox_2.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var2)
             self.select_frame_by_name("anomalies")
 
+    def pmfg_button_event(self):
+        print(self.n_symbols)
+        complete_graph = nx.Graph()
+        for i in range(self.n_symbols):
+            complete_graph.add_node(self.symbols_lst[i], name = self.symbols_lst[i])
+        for i in range(self.n_symbols):
+            for j in range(i+1, self.n_symbols):
+                complete_graph.add_edge(self.symbols_lst[i], self.symbols_lst[j], weight=round(self.stocks_array[i].correlation[j],2))
+        sorted_edges = self.sort_graph_edges(complete_graph)
+        self.compute_PMFG(sorted_edges, len(complete_graph.nodes))
+        self.select_frame_by_name("pmfg")
+        
     # Function to get combo boxes Symbols
     def combobox_callback(self, choice):
         symbol_1 = self.combobox_1.get()
@@ -523,15 +570,13 @@ class App(ctk.CTk):
             time.sleep(1)
         self.init_thread = True
         self.init_metrics()
-        #self.output_textbox.configure(state="normal")
-        #self.output_textbox.insert(ctk.END, "The correlation is finished\n")
-        #self.output_textbox.configure(state="disabled")
-        self.insert_text("The correlation is finished\n")
         self.init_thread = False
 
     # Calculates the correlation of stocks
+
     def init_metrics(self):
-        for i in range(self.n_symbols):
+        stocks_values_const = []
+        for i in range(self.n_symbols):                                               #calculate the correlation for the 1 window
             if i < (self.n_symbols-self.n_stocks_added):
                 self.stocks_array[i].set_index(0)
             for j in range(self.n_symbols-self.n_stocks_added, self.n_symbols):
@@ -539,19 +584,20 @@ class App(ctk.CTk):
                 if j >= i:
                     self.calc_correlation(i,j,0)
             print("correlation_history: ", self.stocks_array[i].correlations_history)
-
+        
         for k in range(1, Stock.n_windows):                                           #calculate the correlations
+            print(k)
             for i in range(self.n_symbols-self.n_stocks_added, self.n_symbols):
                 self.stocks_array[i].update_metrics(k)
             for i in range(self.n_symbols):
-                self.stocks_array[i].set_index(k) #fazer apenas quando nas stocks antigas
+                self.stocks_array[i].set_index(k)                                     #fazer apenas quando nas stocks antigas
                 for j in range(self.n_symbols-self.n_stocks_added, self.n_symbols):
                     if j>=i:
                         self.calc_correlation(i,j,k)
-            print(k)
 
         for i in range(self.n_symbols):
             self.stocks_array[i].set_last_correlation()
+        self.insert_text("The correlation is finished\n")
 
     def calc_correlation(self,i,j,k):
         if i == j:
@@ -572,6 +618,7 @@ class App(ctk.CTk):
         y = list(itertools.islice(self.stocks_array[j].rentability, k, Stock.n_ticks-1+k))
         z, _ = pearsonr(x, y)
         print(z,":", self.stocks_array[i].correlations_history[j][k])
+
 
     # Function that updates the plot every time an item is checked
     def checkbox_frame_event(self):
@@ -632,7 +679,7 @@ class App(ctk.CTk):
                     if j > i and (j in stocks_updated):
                         pass
                     else:
-                        labels, index_1, index_2 = self.iqr_anomaly_detector(self.symbols_lst[stocks_updated[i]],self.symbols_lst[stocks_updated[j]])
+                        labels, index_1, index_2 = self.anomaly_detector(self.symbols_lst[i],self.symbols_lst[j])
                         if labels[-1] == 1:
                             tk.messagebox.showinfo("Anomaly","Anomaly on the correlation of stocks: " + self.symbols_lst[stocks_updated[i]] + " and " + self.symbols_lst[stocks_updated[j]])
 
@@ -733,6 +780,109 @@ class App(ctk.CTk):
         # Find the anomalies
         anomalies = np.where(distances > threshold)[0]
         return anomalies
+
+    def sort_graph_edges(self,G):
+        sorted_edges = []
+        for source, dest, data in sorted(G.edges(data=True),
+                                         key=lambda x: abs(x[2]['weight']), reverse=True):
+            sorted_edges.append({'source': source,
+                                 'dest': dest,
+                                 'weight': data['weight']})
+        
+        return sorted_edges
+
+    def compute_PMFG(self, sorted_edges, nb_nodes):
+        PMFG = nx.Graph()
+        for edge in sorted_edges:
+            PMFG.add_edge(edge['source'], edge['dest'], weight = edge['weight'])
+            is_planar, P = nx.check_planarity(PMFG)
+            if is_planar == False:
+                PMFG.remove_edge(edge['source'], edge['dest'])
+            
+            if len(PMFG.edges()) == 3*(nb_nodes-2):
+                break
+    
+        self.plot_PMFG(PMFG)
+
+
+    def  plot_PMFG(self, G):
+        self.pmfg_plot_fig.clf()
+        ax = self.pmfg_plot_fig.add_subplot(111);
+        pos = nx.planar_layout(G)
+        eblue = [(u, v) for (u, v, d) in G.edges(data=True) if d["weight"] >= 0.75]
+        ered = [(u, v) for (u, v, d) in G.edges(data=True) if d["weight"] <= -0.75]
+        eblack = [(u, v) for (u, v, d) in G.edges(data=True) if (d["weight"] > -0.75 and d["weight"] < 0.75)]
+
+        nx.draw(G, ax=ax, with_labels = True, pos = pos)
+        labels = nx.get_edge_attributes(G,'weight')
+        nx.draw_networkx_edge_labels(G, pos, labels, ax=ax)
+
+        
+        # nodes
+        #nx.draw_networkx_nodes(G, pos, ax=ax)
+        #for (u,v,d) in G.edges(data=True):
+        #    color = 0
+        #    if d['weight'] <= -0.75:
+        #        color = "red"
+        #    if d['weight'] >= 0.75:
+        #        color = "blue"
+        #    else:
+        #        color = 'black'
+        #    ax.annotate("",
+        #                xy=pos[u], xycoords='data',
+        #                xytext=pos[v], textcoords='data',
+        #                arrowprops=dict(arrowstyle="-", color=color,
+        #                                shrinkA=5, shrinkB=5,
+        #                                patchA=None, patchB=None,
+        #                                connectionstyle="arc3,rad=rrr".replace('rrr',str(0.3*d['weight'])
+        #                                ),
+        #                                ),
+        #                )
+
+        # edges
+        nx.draw_networkx_edges(G, pos, edgelist=ered, alpha=0.5, edge_color="r", ax=ax)
+        nx.draw_networkx_edges(G, pos, edgelist=eblue, alpha=0.5, edge_color="b", ax=ax)
+        nx.draw_networkx_edges(G, pos, edgelist=eblack, alpha=0.5, edge_color="k", ax=ax)
+
+        # node labels
+        nx.draw_networkx_labels(G, pos, font_family="sans-serif", ax=ax)
+        # edge weight labels
+        edge_labels = nx.get_edge_attributes(G, "weight")
+        nx.draw_networkx_edge_labels(G, pos, edge_labels, ax=ax)
+        ax.set_facecolor('#2B2B2B')
+        self.pmfg_plot_fig.set_facecolor('#242424')
+        self.pmfg_canvas.draw()
+        return self.canvas.get_tk_widget()
+
+    #def calculate_PMFG(self, correlation_matrix):
+    #    # Convert correlation matrix to distance matrix
+    #    distance_matrix = np.sqrt(2 * (1 - correlation_matrix))
+    
+    #    # Create a complete graph from the distance matrix
+    #    graph = nx.Graph(distance_matrix)
+    
+    #    # Calculate the minimum spanning tree
+    #    mst = nx.minimum_spanning_tree(graph)
+    
+    #    # Calculate the edge weights for each edge in the minimum spanning tree
+    #    edge_weights = [mst[u][v]['weight'] for u, v in mst.edges()]
+    
+    #    # Sort the edge weights in descending order
+    #    sorted_weights = sorted(edge_weights, reverse=True)
+    
+    #    # Determine the weight threshold for PMFG
+    #    if mst.number_of_nodes() >= 3:
+    #        threshold = sorted_weights[2 * (mst.number_of_nodes() - 2)]
+    
+    #    # Create the PMFG graph
+    #    pmfg = nx.Graph()
+    
+    #    # Add edges to the PMFG graph based on the weight threshold
+    #    for u, v, weight in mst.edges(data='weight'):
+    #        if weight >= threshold:
+    #            pmfg.add_edge(u, v, weight=weight)
+    
+    #    return pmfg
 
 if __name__ == "__main__":
     app = App()
