@@ -16,6 +16,8 @@ class Stock:
     # Inicialization of the object
     def __init__(self, symbol: str):
         self.symbol: str = symbol                               # symbol symbol
+        self.sector = "None"
+        self.industry = "None"
         self.close_data = deque(maxlen = Stock.n_ticks + Stock.n_windows -1)         # deque with close values
         self.log_close_data = deque(maxlen = Stock.n_ticks + Stock.n_windows -1)     # deque with logaritmic close values
         self.rentability = deque(maxlen = (Stock.n_ticks + Stock.n_windows - 2))  # deque with rentability values
@@ -46,6 +48,8 @@ class Stock:
             self.close_data.reverse()
             self.log_close_data.reverse()
 
+        self.webscrape_info()
+
         self.init_metrics()
 
     # Get webpage code
@@ -63,6 +67,17 @@ class Stock:
             return doc
         except:
             return 4
+
+    def webscrape_info(self):
+        url = "https://finance.yahoo.com/quote/" + self.symbol + "/profile?p=" + self.symbol
+        doc = self.webscrape_page(url)
+        try:
+            text = doc.find_all("span", class_= "Fw(600)")
+
+            self.sector = text[0].text
+            self.industry =text[1].text
+        except:
+            pass
 
     # Get the past n_ticks close values 
     def init_close(self):
@@ -182,7 +197,7 @@ class Stock:
         self.calc_risk(Stock.n_windows-1)
 
     def check_market_status(self):
-        history_url = "https://finance.yahoo.com/quote/" + self.symbol + "/history?p=" + self.symbol #concatenação de strings para obter a webpage da respetiva stock
+        history_url = "https://finance.yahoo.com/quote/" + self.symbol  #concatenação de strings para obter a webpage da respetiva stock
         doc = self.webscrape_page(history_url)                     # Webscrapes the page
         if doc == 1:
             raise ValueError("Didn't find the Stock: " + self.symbol + "\n")
@@ -193,7 +208,7 @@ class Stock:
         else:
             text = doc.find_all("div", {"id": "quote-market-notice"})
             print(text)
-            market_state = ( str(text).replace(".</span></div>]","") ).split(". ")
+            market_state = str(text).split("At close")
             print(market_state)
             if len(market_state) == 2:  #analisar melhor as condições no sentido a  retirar o if possiblidade de iniciar com "Market open"
                 self.prev_market_state == "Market Open"
