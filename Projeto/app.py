@@ -11,6 +11,7 @@ from scipy.stats import shapiro
 
 
 import networkx as nx
+from networkx.drawing.nx_agraph import graphviz_layout
 
 from tksheet import Sheet
 import threading as th
@@ -19,13 +20,15 @@ import tkinter.messagebox
 from tkinter import ttk
 import customtkinter as ctk
 import math
+from community import community_louvain
 
 import time
 import os
 import requests
 import bs4
-from PIL import Image # To use images on the app
+#from PIL import Image # To use images on the app
 from sklearn.neighbors import LocalOutlierFactor
+from sklearn.preprocessing import MinMaxScaler
 
 import collections
 
@@ -36,6 +39,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg # NavigationTool
 from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
+import matplotlib.cm as cm
 
 ctk.set_appearance_mode("System")  # Modes: "System" (standard), "Dark", "Light"
 ctk.set_default_color_theme("blue")  # Themes: "blue" (standard), "green", "dark-blue"
@@ -268,7 +272,7 @@ class App(ctk.CTk):
 
         # Images
         image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "images")
-        self.home_logo_image = ctk.CTkImage(light_image=Image.open(os.path.join(image_path, "home_logo.png")), size=(20, 20))
+        #self.home_logo_image = ctk.CTkImage(light_image=Image.open(os.path.join(image_path, "home_logo.png")), size=(20, 20))
 
         # Configure window
         self.title("Financial Markets")
@@ -395,17 +399,19 @@ class App(ctk.CTk):
         self.pmfg_button.grid(row=3, column=0, sticky="ew")
         # PMFG frame
         self.pmfg_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
-        self.pmfg_frame.rowconfigure(0, weight=1)
-        self.pmfg_frame.columnconfigure(0, weight=1)
+        self.pmfg_frame.rowconfigure(1, weight=1)
+        self.pmfg_frame.columnconfigure(1, weight=1)
 
         # PMFG plot
         self.pmfg_plot_fig = Figure(figsize=(5,5), dpi=100)
         self.pmfg_plot_fig.patch.set_facecolor('#242424')
         self.pmfg_canvas = FigureCanvasTkAgg(self.pmfg_plot_fig, master=self.pmfg_frame)
         self.pmfg_canvas.get_tk_widget().grid(row=1, column=0, columnspan=3, sticky = "nsew")
+        self.louvain_checkbox = ctk.CTkCheckBox(self.pmfg_frame, command=self.pmfg_callback, text="Identify Communities")
+        self.louvain_checkbox.grid(row=0, column=0, padx=(10,0))
         # Create a toolbar and grid it onto the app
         toolbar = NavigationToolbar2Tk(self.pmfg_canvas, self.pmfg_frame, pack_toolbar=False)
-        toolbar.grid(row=0, column=0)
+        toolbar.grid(row=0, column=1)
         #toolbar.setStyleSheet("background-color:Gray14;")
         toolbar.config(bg='#242424')
         toolbar._message_label.config(background='#242424')
@@ -458,7 +464,7 @@ class App(ctk.CTk):
             self.select_frame_by_name("correlations")
 
     def anomalies_button_event(self):
-        if (self.n_symbols > 0):
+        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread) and (self.n_symbols > 0):
             combobox_var1 = ctk.StringVar(value=self.stocks_array[0].symbol)  # set initial value
             self.combobox_1.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var1)
             if self.n_symbols <= 1:
@@ -469,26 +475,25 @@ class App(ctk.CTk):
             self.select_frame_by_name("anomalies")
 
     def pmfg_button_event(self):
-        complete_graph = nx.Graph()
-        sectors = np.empty(self.n_symbols, dtype='U256')
-        for i in range(self.n_symbols):
-            complete_graph.add_node(self.symbols_lst[i], name = self.symbols_lst[i])
-            sectors[i] = self.stocks_array[i].sector
-
-        for i in range(self.n_symbols):
-            for j in range(i+1, self.n_symbols):
-                complete_graph.add_edge(self.symbols_lst[i], self.symbols_lst[j], weight=round(self.stocks_array[i].correlation[j],2))
-        sorted_edges = self.sort_graph_edges(complete_graph)
-        self.compute_PMFG(sorted_edges, len(complete_graph.nodes), sectors)
-        self.select_frame_by_name("pmfg")
+        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread) and (self.n_symbols > 0):
+            self.pmfg_callback()
+            self.select_frame_by_name("pmfg")
         
     # Function to get combo boxes Symbols
-    def combobox_callback(self, choice):
-        symbol_1 = self.combobox_1.get()
-        symbol_2 = self.combobox_2.get()
-        if symbol_1 != symbol_2:
-            labels, index_1, index_2 = self.anomaly_detector(symbol_1, symbol_2)
-            self.plot_anomalies(labels, self.stocks_array[index_1].correlations_history[index_2], symbol_1, symbol_2)
+    def combobox_callback(self):
+        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread) and (self.n_symbols > 0):
+            symbol_1 = self.combobox_1.get()
+            symbol_2 = self.combobox_2.get()
+            if symbol_1 != symbol_2:
+                labels, index_1, index_2 = self.anomaly_detector(symbol_1, symbol_2)
+                self.plot_anomalies(labels, self.stocks_array[index_1].correlations_history[index_2], symbol_1, symbol_2)
+
+    def pmfg_callback(self):
+        PMFG, sectors = self.create_graph()
+        if self.louvain_checkbox.get() == 0:
+            self.plot_PMFG(PMFG, sectors)
+        else:
+            self.plot_communities(PMFG)
 
     # Create the plot graphic for anomalies
     def plot_anomalies(self, labels, values, symbol_1, symbol_2):
@@ -497,7 +502,8 @@ class App(ctk.CTk):
         for spine in ax.spines.values():
             spine.set_edgecolor('white')
         colors = ['g' if l == 0 else 'r' for l in labels]
-        x = [value for value in range(Stock.n_windows)]
+        print(labels)
+        x = [-value for value in range(1,Stock.n_windows+1)]
         ax.scatter(x, values, c = colors)
         ax.legend(frameon=False)
         ax.set_facecolor('#2B2B2B')
@@ -677,10 +683,10 @@ class App(ctk.CTk):
                 for j in range(self.n_symbols):
                     if j > i and (j in stocks_updated):
                         pass
-                    else:
+                    elif self.stocks_array[i].correlations_history[j][Stock.n_windows-1] > 0.7 or self.stocks_array[i].correlations_history[j][Stock.n_windows-1] < 0.7:
                         labels, index_1, index_2 = self.anomaly_detector(self.symbols_lst[i],self.symbols_lst[j])
                         if labels[-1] == 1:
-                            tk.messagebox.showinfo("Anomaly","Anomaly on the correlation of stocks: " + self.symbols_lst[self.symbols_lst[i]] + " and " + self.symbols_lst[j])
+                            tk.messagebox.showinfo("Anomaly","Anomaly on the correlation of stocks: " + self.symbols_lst[i] + " and " + self.symbols_lst[j])
 
             
     # Removes stock from lists
@@ -711,90 +717,96 @@ class App(ctk.CTk):
         self.output_textbox.configure(state="disabled")
         self.textbox_n_lines += 1
 
-
-    #  Label anomalies
-    def find_anomalies(self, value, lower_threshold, upper_threshold):
-        if value < lower_threshold or value > upper_threshold:
-            return 1
-        else: 
-            return 0
-
-    def asymmetrical_z_score_anomalies(self, data):
-        criterion = 2.431
-        trans_data = []
-        x_1 = min(data)
-        x_n = max(data)
-        for value in data:
-            trans_data.append(math.sqrt((value-x_1) / (x_n-x_1)) )
-        z_scores = stats.zscore(trans_data)
-        print(z_scores)
-        labels = []
-        for value in z_scores:
-            if value >= criterion or value <= - criterion:
-                labels.append(1)
-            else:
-                labels.append(0)
-        return labels
-
-    def normal_z_score_anomalies(self, data):
-        criterion = 3.588
-        z_scores = stats.zscore(data)
-        print(z_scores)
-        labels = []
-        for value in z_scores:
-            if value >= criterion or value <= - criterion:
-                labels.append(1)
-            else:
-                labels.append(0)
-        return labels
-        
-
     def anomaly_detector(self, symbol_1, symbol_2):
         index_1 = self.symbols_lst.index(symbol_1)
         index_2 = self.symbols_lst.index(symbol_2)
         data = list(collections.deque(self.stocks_array[index_1].correlations_history[index_2]))
-        #lof_anomalies = self.LOF_anomaly_detector(data)
-        #mad_anomalies = self.MAD_anomaly_detector(data)
-        #print("LOF anomalies: ", lof_anomalies)
-        #print("MAD anomalies: ", mad_anomalies)
-        #both_anomalies = [index for index in lof_anomalies if index in mad_anomalies]
-        #print("Both anomalies: ", both_anomalies)
-        #labels = [0] * Stock.n_windows
-        #for index in both_anomalies:
-        #    labels[index] = 1
-        shapiro_test = shapiro(data)
-        if shapiro_test.pvalue > 0.05:
-            labels = self.normal_z_score_anomalies(data)
+        temp_data = np.array([i for i in range(len(data))]).reshape(-1,1)
+        lof_anomalies = self.LOF_anomaly_detector(data, temp_data)
+        kol_smir_test = stats.kstest(data,stats.norm.cdf)
+        labels = [0] * Stock.n_windows
+        dist_labels = []
+        if kol_smir_test.pvalue > 0.05:
+            dist_anomalies = self.mod_score_detector(data, lof_anomalies)
         else:
-            labels = self.asymmetrical_z_score_anomalies(data)
+            dist_anomalies = self.MAD_anomaly_detector(data, lof_anomalies)
+            
+        for index in dist_anomalies:
+            labels[index] = 1
+
         return labels, index_1, index_2
 
-    def LOF_anomaly_detector(self, data):
-        k = 5
+    def LOF_anomaly_detector(self, data, temp_data):
+        k = 10
         # Calculate the LOF
         data = np.array(data)
         data = data.reshape(-1,1)
+        scaler = MinMaxScaler(feature_range=(-1, 1))
+        temp_data = scaler.fit_transform(temp_data)
+        data = scaler.fit_transform(data)
+        print(temp_data)
+        data_2D = [[temp_data[i][0],data[i][0]] for i in range(data.shape[0])]
+        data_2D = np.array(data_2D)
+        print(data_2D)
         lof = LocalOutlierFactor(n_neighbors=k)
-        lof.fit(data)
+        lof.fit(data_2D)
         lof_scores = -lof.negative_outlier_factor_
+        print(lof_scores)
+        print(np.mean(lof_scores))
         # Choose the threshold for anomalies
-        threshold = 1.5
+        threshold = 1.2
         # Find the anomalies
         anomalies = np.where(lof_scores > threshold)[0]
         return anomalies
 
-    def MAD_anomaly_detector(self, data):
+    def mod_score_detector(self, data, lof_anomalies):
+        criterion = 3.5
+        median = np.median(data)
+        mad = np.median(np.abs(data - median))
+        z_scores = stats.zscore(data)
+        print(z_scores)
+        z_scores = 0.6745 * np.abs(data-median) / mad
+        anomalies = []
+        for i in range(z_scores.shape[0]):
+            if abs(z_scores[i]) >= criterion and i in lof_anomalies:
+                anomalies.append(i)
+            if abs(z_scores[i]) <= criterion and i in lof_anomalies:
+                anomalies.append(i)
+        return anomalies
+
+    def MAD_anomaly_detector(self, data, lof_anomalies):
         # Calculate the median
         median = np.median(data)
         # Calculate the median absolute deviation (MAD)
         mad = np.median(np.abs(data - median))
+        # Calculate constant
+        c = 1/np.quantile(data, 0.75)
         # Set the threshold for anomalies
-        threshold = 2.5
-        # Calculate the distances from the median in units of MADs
-        distances = np.abs(data - median) / mad
+        low_thresh = median - 2*mad*c
+        high_thresh = median + 2*mad*c
+       
         # Find the anomalies
-        anomalies = np.where(distances > threshold)[0]
+        anomalies = []
+        for i in range(len(data)):
+            if (data[i] > high_thresh or data[i] < low_thresh) and i in lof_anomalies:
+                anomalies.append(i)
+            elif (data[i] < high_thresh or data[i] > low_thresh) and i in lof_anomalies:
+                anomalies.append(i)
         return anomalies
+
+    def create_graph(self):
+        complete_graph = nx.Graph()
+        sectors = np.empty(self.n_symbols, dtype='U256')
+        for i in range(self.n_symbols):
+            complete_graph.add_node(self.symbols_lst[i], name = self.symbols_lst[i])
+            sectors[i] = self.stocks_array[i].sector
+
+        for i in range(self.n_symbols):
+            for j in range(i+1, self.n_symbols):
+                complete_graph.add_edge(self.symbols_lst[i], self.symbols_lst[j], weight=round(self.stocks_array[i].correlation[j],2))
+        sorted_edges = self.sort_graph_edges(complete_graph)
+        unique_sectors = np.unique(sectors)
+        return self.compute_PMFG(sorted_edges, len(complete_graph.nodes), unique_sectors), unique_sectors
 
     def sort_graph_edges(self,G):
         sorted_edges = []
@@ -817,37 +829,36 @@ class App(ctk.CTk):
             if len(PMFG.edges()) == 3*(nb_nodes-2):
                 break
     
-        self.plot_PMFG(PMFG, sectors)
-
+        return PMFG
 
     def plot_PMFG(self, G, sectors):
         self.pmfg_plot_fig.clf()
         ax = self.pmfg_plot_fig.add_subplot(111);
+
         pos = nx.planar_layout(G)
         eblue = [(u, v) for (u, v, d) in G.edges(data=True) if d["weight"] >= 0.75]
         ered = [(u, v) for (u, v, d) in G.edges(data=True) if d["weight"] <= -0.75]
         eblack = [(u, v) for (u, v, d) in G.edges(data=True) if (d["weight"] > -0.75 and d["weight"] < 0.75)]
         color_map = []
-        unique_sectors = np.unique(sectors)
-        n_sectors = len(unique_sectors)
+        n_sectors = len(sectors)
         colors = [x*1.0/n_sectors for x in range(n_sectors)]
-        for i in range(self.n_symbols):
-            for j in range(n_sectors):
-                if sectors[i] == unique_sectors[j]:
-                    color_map.append(colors[j])
-
-        labels = {}    
+        labels = {}
         for node in G.nodes():
             labels[node] = node
+            for j in range(self.n_symbols):
+                if node == self.stocks_array[j].symbol:
+                    k = np.where(sectors == self.stocks_array[j].sector)
+                    color_map.append(colors[k[0][0]])
+                    break
 
         cmap = plt.get_cmap('tab20')
         node_colors = cmap(color_map)
+        # nodes
         nx.draw_networkx_nodes(G, ax=ax, node_color=node_colors, pos=pos, linewidths=1, edgecolors="white")
         nx.draw_networkx_labels(G, pos, labels, font_color="white", ax=ax)
- #       labels = nx.get_edge_attributes(G,'weight')
-  #      nx.draw_networkx_edge_labels(G, pos, labels, ax=ax)
+
         sector_labels = cmap(colors)
-        legend_elements = [Line2D([0], [0], marker='o', color="w", label=unique_sectors[i],
+        legend_elements = [Line2D([0], [0], marker='o', color="w", label=sectors[i],
                           markerfacecolor=sector_labels[i], markersize=15) for i in range(n_sectors)]
 
         # edges
@@ -855,13 +866,37 @@ class App(ctk.CTk):
         nx.draw_networkx_edges(G, pos, edgelist=eblue, alpha=0.5, edge_color="b", ax=ax)
         nx.draw_networkx_edges(G, pos, edgelist=eblack, alpha=0.5, edge_color="w", ax=ax)
 
-        # node labels
-     #   nx.draw_networkx_labels(G, pos, font_family="sans-serif", ax=ax)
-        # edge weight labels
-     #   edge_labels = nx.get_edge_attributes(G, "weight")
-      #  nx.draw_networkx_edge_labels(G, pos, edge_labels, ax=ax)
-        ax.set_facecolor('#2B2B2B')
         legend = ax.legend(handles=legend_elements, fancybox=True, framealpha=0.0)
+        self.pmfg_plot_fig.set_facecolor('#242424')
+        self.pmfg_canvas.draw()
+        return self.canvas.get_tk_widget()
+
+    def plot_communities(self, G):
+        self.pmfg_plot_fig.clf()
+        ax = self.pmfg_plot_fig.add_subplot(111);
+        labels = {}
+        for node in G.nodes():
+            labels[node] = node
+        #first compute the best partition
+        partition = community_louvain.best_partition(G)
+        eblue = [(u, v) for (u, v, d) in G.edges(data=True) if d["weight"] >= 0.75]
+        ered = [(u, v) for (u, v, d) in G.edges(data=True) if d["weight"] <= -0.75]
+        eblack = [(u, v) for (u, v, d) in G.edges(data=True) if (d["weight"] > -0.75 and d["weight"] < 0.75)]
+
+
+        # draw the graph
+        pos = nx.spring_layout(G)
+        # color the nodes according to their partition
+        cmap = cm.get_cmap('viridis', max(partition.values()) + 1)
+        nx.draw_networkx_nodes(G, pos, partition.keys(), node_size=40,
+                               cmap=cmap, node_color=list(partition.values()), ax=ax)
+
+        nx.draw_networkx_labels(G, pos, labels, font_color="white", ax=ax)
+        # edges
+        nx.draw_networkx_edges(G, pos, edgelist=ered, alpha=0.5, edge_color="r", ax=ax)
+        nx.draw_networkx_edges(G, pos, edgelist=eblue, alpha=0.5, edge_color="b", ax=ax)
+        nx.draw_networkx_edges(G, pos, edgelist=eblack, alpha=0.5, edge_color="w", ax=ax)
+
         self.pmfg_plot_fig.set_facecolor('#242424')
         self.pmfg_canvas.draw()
         return self.canvas.get_tk_widget()

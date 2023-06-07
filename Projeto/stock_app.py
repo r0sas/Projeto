@@ -1,17 +1,17 @@
-from ast import Try
 import bs4
 import requests
 import math
-import matplotlib.pyplot as plt
 import numpy as np
-import itertools
 from collections import deque
+from pandas.tseries.offsets import BDay
+from datetime import datetime 
+import time
 
 class Stock:
     # Class-level variables
     n_ticks = 30                                         # class-level variable with the number of ticks
     n_stocks = 0                                        # class-level variable with the number of stocks
-    n_windows = 30
+    n_windows = 100
 
     # Inicialization of the object
     def __init__(self, symbol: str):
@@ -34,8 +34,8 @@ class Stock:
             self.prev_market_state = "Market Open"
         else: 
             self.prev_market_state = "Market Close"
-
-        result = self.init_close()
+        end = datetime.today() 
+        result = self.getStockData(end,200)
         if result == 1:
             raise ValueError("Didn't find the Stock: " + symbol + "\n")
         elif result == 2:
@@ -73,42 +73,52 @@ class Stock:
         doc = self.webscrape_page(url)
         try:
             text = doc.find_all("span", class_= "Fw(600)")
-
             self.sector = text[0].text
             self.industry =text[1].text
         except:
             pass
 
+    def getStockData(self,endPeriod,businessDays):
+        businessDaysSets = int(businessDays/100)
+        i = 0
+        for y in range(businessDaysSets):
+            end = endPeriod - BDay(y*100+(y))
+            start = end - BDay(100)
+            unixStart = int(time.mktime(start.timetuple()))
+            unixEnd = int(time.mktime(end.timetuple()))
+            url =('https://finance.yahoo.com/quote/' + str(self.symbol) + '/history?period1=' + str(unixStart) + '&period2=' + str(unixEnd) + '&interval=1d&filter=history&frequency=1d')
+            result = self.init_close(url, i)
+            if result < 0:
+                i = abs(result)
+            elif result in [1,2,4]:
+                return result
+        if i != (Stock.n_ticks + Stock.n_windows-1):
+            return 3
+
     # Get the past n_ticks close values 
-    def init_close(self):
-        history_url = "https://finance.yahoo.com/quote/" + self.symbol + "/history?p=" + self.symbol #concatenação de strings para obter a webpage da respetiva stock
-        doc = self.webscrape_page(history_url)                     #obter dados da página
+    def init_close(self, url, i):
+        doc = self.webscrape_page(url)                     #obter dados da página
         if doc == 1 or doc == 2 or doc == 4:
             return doc
         table_body = doc.find('tbody')                  #selecionar tabela de dados
         rows = table_body.find_all('tr')                #selecionar colunas
-        i = 0
         if self.prev_market_state == "Market Open":
             rows.pop(0)
         for row in rows:
             cols=row.find_all('td')                     #obtenção de colunas
             cols=[x.text.strip() for x in cols]
-            value = cols[-2]
-            if "," in value:                            # Removes commas from numbers
-                value = value.replace(",", "")
             try:                                        #Irá verificar se a coluna não tem informações acerca de stocks_split
-                float(value)
-            except:
-                pass
-            else:
+                value = cols[-3]
+                if "," in value:                            # Removes commas from numbers
+                    value = value.replace(",", "")
                 self.close_data.append(float(value))         #guardar os dados do close, que estão na última coluna
                 self.log_close_data.append(math.log(float(value)))
-                i += 1;
+                i += 1
+            except:
+                pass
             if i == (Stock.n_ticks + Stock.n_windows-1):
                 break
-        if i != (Stock.n_ticks + Stock.n_windows-1):
-            return 3
-        return 0
+        return -i
 
     # Calculates the rentability 
     def calc_rentability(self):              
@@ -174,14 +184,30 @@ class Stock:
     def webscrape_close(self):
         history_url = "https://finance.yahoo.com/quote/" + self.symbol + "/history?p=" + self.symbol #concatenação de strings para obter a webpage da respetiva stock
         doc = self.webscrape_page(history_url)                     #obter dados da página
-        text = doc.find_all("fin-streamer", class_="Fw(b) Fz(36px) Mb(-4px) D(ib)")
-        return (float(text[0].text))
+
+        table_body = doc.find('tbody')                  #selecionar tabela de dados
+        rows = table_body.find_all('tr')                #selecionar colunas
+        for row in rows:
+            cols=row.find_all('td')                     #obtenção de colunas
+            if len(cols) > 4:
+                cols=[x.text.strip() for x in cols]
+                value = cols[-3]
+                if "," in value:                            # Removes commas from numbers
+                    value = value.replace(",", "")
+                try:                                        #Irá verificar se a coluna não tem informações acerca de stocks_split
+                    float(value)
+                    return float(value)
+                except:
+                    pass
 
     # Get the current close data
     # Save the new value in the deque
     # Save the log of the new value for the close on another deque
     def add_close(self):
+        print("updated")
         close_value = self.webscrape_close()
+        print(close_value)
+        print(self.log_close_data)
         self.close_data.append(close_value)
         self.log_close_data.append(math.log(close_value))
 
@@ -197,7 +223,7 @@ class Stock:
         self.calc_risk(Stock.n_windows-1)
 
     def check_market_status(self):
-        history_url = "https://finance.yahoo.com/quote/" + self.symbol  #concatenação de strings para obter a webpage da respetiva stock
+        history_url = "https://finance.yahoo.com/quote/"+self.symbol+"?p="+self.symbol+"&.tsrc=fin-srch"  #concatenação de strings para obter a webpage da respetiva stock
         doc = self.webscrape_page(history_url)                     # Webscrapes the page
         if doc == 1:
             raise ValueError("Didn't find the Stock: " + self.symbol + "\n")
@@ -208,7 +234,7 @@ class Stock:
         else:
             text = doc.find_all("div", {"id": "quote-market-notice"})
             print(text)
-            market_state = str(text).split("At close")
+            market_state = str(text).split("Market open")
             print(market_state)
             if len(market_state) == 2:  #analisar melhor as condições no sentido a  retirar o if possiblidade de iniciar com "Market open"
                 self.prev_market_state == "Market Open"
