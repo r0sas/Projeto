@@ -36,14 +36,12 @@ class Stock:
             self.prev_market_state = "Market Close"
         end = datetime.today() 
         result = self.getStockData(end,200)
-        if result == 1:
-            raise ValueError("Didn't find the Stock: " + symbol + "\n")
-        elif result == 2:
-            raise ValueError("Due the high frequency of webscraping couldn't fetch data for: " + symbol + ", you should try again after some time\n")
+        if result == 1 or result == 2:
+            raise ValueError("Didn't find the Stock: " + self.symbol + " on Yahoo Finance or due the high frequency of webscraping couldn't fetch data, if the latter, you should try again in a while\n")
         elif result == 3:
-            raise ValueError("Didn't gather enough data for the Stock Symbol: " + symbol + "\n")
+            raise ValueError("Didn't gather enough data for the Stock Symbol: " + self.symbol + "\n")
         elif result == 4:
-            raise ValueError("Max retries exceeded for " + symbol + "\n")
+            raise ValueError("Max retries exceeded for " + self.symbol + "\n")
         else:
             self.close_data.reverse()
             self.log_close_data.reverse()
@@ -74,7 +72,7 @@ class Stock:
         try:
             text = doc.find_all("span", class_= "Fw(600)")
             self.sector = text[0].text
-            self.industry =text[1].text
+            self.industry = text[1].text
         except:
             pass
 
@@ -102,7 +100,7 @@ class Stock:
             return doc
         table_body = doc.find('tbody')                  #selecionar tabela de dados
         rows = table_body.find_all('tr')                #selecionar colunas
-        if self.prev_market_state == "Market Open":
+        if self.prev_market_state == "Market Open" and i == 0:
             rows.pop(0)
         for row in rows:
             cols=row.find_all('td')                     #obtenção de colunas
@@ -225,12 +223,8 @@ class Stock:
     def check_market_status(self):
         history_url = "https://finance.yahoo.com/quote/"+self.symbol+"?p="+self.symbol+"&.tsrc=fin-srch"  #concatenação de strings para obter a webpage da respetiva stock
         doc = self.webscrape_page(history_url)                     # Webscrapes the page
-        if doc == 1:
-            raise ValueError("Didn't find the Stock: " + self.symbol + "\n")
-        elif doc == 2:
-            raise ValueError("Didn't find the Stock : " + self.symbol + "\n")
-        elif doc == 4:
-            raise ValueError("Due the high frequency of webscraping couldn't fetch data for: " + self.symbol + ", you should try again after some time\n")
+        if doc == 1 or doc == 2 or doc == 4:
+            raise ValueError("Didn't find the Stock: " + self.symbol + " on Yahoo Finance or due the high frequency of webscraping couldn't fetch data, if the latter, you should try again in a while\n")
         else:
             text = doc.find_all("div", {"id": "quote-market-notice"})
             print(text)
