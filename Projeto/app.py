@@ -87,15 +87,13 @@ class Info_window(ctk.CTkToplevel):
     def webscrape_info(self, symbol):
         doc = self.webscrape_page(symbol)
 
-        text = doc.find("h1", class_= "D(ib) Fz(18px)")
-        print(text)
+        text = doc.find("h3", class_= "Fz(m) Mb(10px)")
         self.company_label.configure(text=text.text)
 
         text = doc.find_all("span", class_= "Fw(600)")
-        print(text[0].text)
-        print(text[1].text)
         self.sectors_label.configure(text=("Sector: " + text[0].text))
         self.industry_label.configure(text=("Industry: " + text[1].text))
+        
         text = doc.find("p", class_= "Mt(15px) Lh(1.6)").text
         self.description_text.insert("0.0", (text + "\n"))
         self.description_text.configure(state="disabled")

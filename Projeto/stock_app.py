@@ -43,11 +43,12 @@ class Stock:
         elif result == 4:
             raise ValueError("Max retries exceeded for " + self.symbol + "\n")
         else:
+            for value in self.close_data:
+                print(value)
             self.close_data.reverse()
             self.log_close_data.reverse()
 
         self.webscrape_info()
-
         self.init_metrics()
 
     # Get webpage code
@@ -86,6 +87,7 @@ class Stock:
             unixEnd = int(time.mktime(end.timetuple()))
             url =('https://finance.yahoo.com/quote/' + str(self.symbol) + '/history?period1=' + str(unixStart) + '&period2=' + str(unixEnd) + '&interval=1d&filter=history&frequency=1d')
             result = self.init_close(url, i)
+            print(url)
             if result < 0:
                 i = abs(result)
             elif result in [1,2,4]:
