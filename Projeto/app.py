@@ -667,34 +667,40 @@ class App(ctk.CTk):
             self.update_stocks_thread = True
             stocks_updated = []
             self.insert_text("Evaluating markets\n")
-            for stock in self.stocks_array:
-                try:
-                    status = stock.check_market_status()            # check the if the market changed from close->open or open->close
-                    print(status)
-                    if status == 0:
-                        #self.insert_text("Updated the value of the Stock " + stock.symbol + ", (" + str(stock.close_data[0])+ "," + str(stock.close_data[self.n_ticks-1]) + ")")
-                        stock.update_metrics_realtime()
-                        #self.insert_text( " -> (" + str(stock.close_data[0]) + "," + str(stock.close_data[self.n_ticks-1]) + ")\n")
-                        stocks_updated.append(self.symbols_lst.index(stock.symbol))
-                except ValueError as e:  
-                    self.insert_text(str(e))
+            i = 0
+            while i < len(self.stocks_array):
+                stock = self.stocks_array[i]
+                status = stock.check_market_status()            # check the if the market changed from close->open or open->close
+                print(status)
+                if status == 0:
+                    #self.insert_text("Updated the value of the Stock " + stock.symbol + ", (" + str(stock.close_data[0])+ "," + str(stock.close_data[self.n_ticks-1]) + ")")
+                    stock.update_metrics_realtime()
+                    #self.insert_text( " -> (" + str(stock.close_data[0]) + "," + str(stock.close_data[self.n_ticks-1]) + ")\n")
+                    stocks_updated.append(self.symbols_lst.index(stock.symbol))
+                    i += 1
+                elif status != 3:
+                    i += 1
+                else:  
+                    time.sleep(30)
             if len(stocks_updated) >= 1:
                 self.insert_text("Calculating new correlation values\n")
-            for i in stocks_updated:
-                for j in range(self.n_symbols):
-                    if j > i and (j in stocks_updated):
-                        pass
-                    else:
-                        self.calc_correlation(i,j,Stock.n_windows-1)
+                for i in stocks_updated:
+                    for j in range(self.n_symbols):
+                        if j > i and (j in stocks_updated):
+                            pass
+                        else:
+                            self.calc_correlation(i,j,Stock.n_windows-1)
+                self.insert_text("Evaluating anomalies\n")
+                for i in stocks_updated:
+                    for j in range(self.n_symbols):
+                        if j > i and (j in stocks_updated):
+                            pass
+                        elif self.stocks_array[i].correlations_history[j][Stock.n_windows-1] > 0.5 or self.stocks_array[i].correlations_history[j][Stock.n_windows-1] < -0.5:
+                            labels, index_1, index_2 = self.anomaly_detector(self.symbols_lst[i],self.symbols_lst[j])
+                            if labels[-1] == 1:
+                                tk.messagebox.showinfo("Anomaly","Anomaly on the correlation of stocks: " + self.symbols_lst[i] + " and " + self.symbols_lst[j])
+            self.insert_text("Finished the update\n")
 
-            for i in stocks_updated:
-                for j in range(self.n_symbols):
-                    if j > i and (j in stocks_updated):
-                        pass
-                    elif self.stocks_array[i].correlations_history[j][Stock.n_windows-1] > 0.5 or self.stocks_array[i].correlations_history[j][Stock.n_windows-1] < -0.5:
-                        labels, index_1, index_2 = self.anomaly_detector(self.symbols_lst[i],self.symbols_lst[j])
-                        if labels[-1] == 1:
-                            tk.messagebox.showinfo("Anomaly","Anomaly on the correlation of stocks: " + self.symbols_lst[i] + " and " + self.symbols_lst[j])
 
             
     # Removes stock from lists

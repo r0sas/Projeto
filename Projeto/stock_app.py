@@ -226,7 +226,7 @@ class Stock:
         history_url = "https://finance.yahoo.com/quote/"+self.symbol+"?p="+self.symbol+"&.tsrc=fin-srch"  #concatenação de strings para obter a webpage da respetiva stock
         doc = self.webscrape_page(history_url)                     # Webscrapes the page
         if doc == 1 or doc == 2 or doc == 4:
-            raise ValueError("Didn't find the Stock: " + self.symbol + " on Yahoo Finance or due the high frequency of webscraping couldn't fetch data, if the latter, you should try again in a while\n")
+            return 3
         else:
             text = doc.find_all("div", {"id": "quote-market-notice"})
             print(text)
