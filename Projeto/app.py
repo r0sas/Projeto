@@ -1,11 +1,12 @@
-from unittest.util import _MAX_LENGTH
 from stock_app import Stock
 
 import pandas as pd #remover
 import numpy as np
 import itertools
+import scipy.stats as stats
 from scipy.stats import pearsonr
 
+import networkx as nx
 
 from tksheet import Sheet
 import threading as th
@@ -13,21 +14,29 @@ import tkinter as tk
 import tkinter.messagebox
 from tkinter import ttk
 import customtkinter as ctk
+import math
+from community import community_louvain
 
 import time
 import os
 import requests
 import bs4
-from PIL import Image # To use images on the app
+#from PIL import Image # To use images on the app
+from sklearn.neighbors import LocalOutlierFactor
+from sklearn.preprocessing import MinMaxScaler
 
+import collections
 
 import matplotlib
+import matplotlib.pyplot as plt
 matplotlib.use("TkAgg")
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg # NavigationToolbar2TkAgg
 from matplotlib.backends.backend_tkagg import NavigationToolbar2Tk
 from matplotlib.figure import Figure
+from matplotlib.lines import Line2D
+import matplotlib.cm as cm
 
-ctk.set_appearance_mode("System")  # Modes: "System" (standard), "Dark", "Light"
+ctk.set_appearance_mode("Dark")  # Modes: "System" (standard), "Dark", "Light"
 ctk.set_default_color_theme("blue")  # Themes: "blue" (standard), "green", "dark-blue"
 
 class Info_window(ctk.CTkToplevel):
@@ -58,7 +67,10 @@ class Info_window(ctk.CTkToplevel):
         self.description_text = ctk.CTkTextbox(self, font=ctk.CTkFont(size=14))
         self.description_text.grid(row = 5, column=0, sticky = "nsew", padx=(10,10), pady=(0,10))
 
-        self.webscrape_info(symbol)
+        try:
+            self.webscrape_info(symbol)
+        except:
+            pass
 
     # Get webpage source code
     def webscrape_page(self, symbol):
@@ -74,12 +86,14 @@ class Info_window(ctk.CTkToplevel):
 
     def webscrape_info(self, symbol):
         doc = self.webscrape_page(symbol)
-        text = doc.find("h1", class_= "D(ib) Fz(18px)")
+
+        text = doc.find("h3", class_= "Fz(m) Mb(10px)")
         self.company_label.configure(text=text.text)
 
         text = doc.find_all("span", class_= "Fw(600)")
-        self.sectors_label.configure(text=("Sector: " + text[1].text))
-        self.industry_label.configure(text=("Industry: " + text[2].text))
+        self.sectors_label.configure(text=("Sector: " + text[0].text))
+        self.industry_label.configure(text=("Industry: " + text[1].text))
+        
         text = doc.find("p", class_= "Mt(15px) Lh(1.6)").text
         self.description_text.insert("0.0", (text + "\n"))
         self.description_text.configure(state="disabled")
@@ -195,13 +209,14 @@ class ScrollableCheckBoxFrame(ctk.CTkScrollableFrame):
         else:
             self.info_window.focus()
 
+# Table for correlation heatmap
 class UI_Table(tk.Tk):
     def __init__(self, main_window, **kw):
         self.table = Sheet(main_window)
         self.table.change_theme("dark")
         self.table.grid(row=0, column=0, sticky="nsew")
-        self.heatmap_colors = ["#90083A", "#C93545", "#EE5F40", "#FAA15B", "#FED885", "#FEFDBA", "#E6EF92", "#A6D59E", "#63B99C", "#2D80B2", "#504A94"]
-        self.heatmap_intervals = [-0.85, -0.7, -0.5, -0.3, -0.1, 0.1, 0.3, 0.5, 0.7, 0.85]
+        self.heatmap_colors = ["#90083A", "#EE5F40", "#FED885", "#A6D59E", "#63B99C", "#504A94"]
+        self.heatmap_intervals = [-0.75, -0.5, 0, 0.5, 0.75]
         self.n_colors = len(self.heatmap_colors)
 
     def update_columns(self, headers): #pode ser otimizado
@@ -222,6 +237,7 @@ class UI_Table(tk.Tk):
     def update_index(self):
         self.table.row_index(newindex = self.table.headers(), index = None, reset_row_positions = False, show_index_if_not_sheet = True, redraw = False)
 
+    # color the table
     def heat_map(self):
         num_columns = len(self.table.headers())
         num_rows = self.table.get_total_rows()
@@ -244,17 +260,15 @@ class App(ctk.CTk):
         self.init_thread = False
         self.add_thread = False
         self.update_stocks_thread = False
+        self.pmfg_thread = False
         self.symbols_lst = []
         self.stocks_array = []
         self.n_symbols = 0
         self.n_stocks_added = 0
+        self.textbox_n_lines = 0
         background_update_thread = th.Thread(target=self.background_close_value_update)
         background_update_thread.setDaemon(True)
         background_update_thread.start()
-
-        # Images
-        image_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "images")
-        self.home_logo_image = ctk.CTkImage(light_image=Image.open(os.path.join(image_path, "home_logo.png")), size=(20, 20))
 
         # Configure window
         self.title("Financial Markets")
@@ -275,7 +289,7 @@ class App(ctk.CTk):
         # Side bar home button
         self.home_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Home",
                                                    fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
-                                                   image=self.home_logo_image, anchor="w", command=self.home_button_event)
+                                                    anchor="w", command=self.home_button_event)
         self.home_button.grid(row=0, column=0, sticky="ew")
 
         # Home frame
@@ -283,6 +297,7 @@ class App(ctk.CTk):
         self.home_frame.grid_columnconfigure(3, weight=1)
         self.home_frame.grid_rowconfigure((2, 3), weight=1)
         self.home_frame.grid_rowconfigure((0, 1), weight=0)
+
 
         # Symbols entry
         self.entry_stocks = ctk.CTkEntry(self.home_frame, placeholder_text = "Stocks (ex: TSLA, AMZN, META)", width=230)
@@ -293,26 +308,19 @@ class App(ctk.CTk):
                                                 command=self.add_stocks_event, width=50)
         self.add_symbols_btn.grid(row=0, column=2, padx=(10, 10), pady=(10, 10), sticky="nsew")
 
+        # Search symbol entry
+        self.search_bar_stocks = ctk.CTkEntry(self.home_frame, placeholder_text = "Search (ex: TSLA)", width=180)
+        self.search_bar_stocks.grid(row=1, column=0, columnspan=2, padx=(10, 0), pady=(10, 10), sticky="nsew")
+
+        # Search symbol button
+        self.search_symbols_btn = ctk.CTkButton(self.home_frame, text="Search", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"),
+                                                 command=self.search_symbols, width=50)
+        self.search_symbols_btn.grid(row=1, column=2, padx=(10, 10), pady=(10, 10), sticky="nsew")
 
         # Scrollable Checkbox Symbols
         self.scrollable_checkbox_frame = ScrollableCheckBoxFrame(self.home_frame, command=self.checkbox_frame_event,
                                                                  item_list=[], width=280)
         self.scrollable_checkbox_frame.grid(row=2, rowspan=1, column=0, columnspan=3 ,padx=(10,10), pady=(0,0), sticky="nsew")
-
-        # Search symbol entry
-        self.search_bar_stocks = ctk.CTkEntry(self.home_frame, placeholder_text = "Search (ex: TSLA)", width=180)
-        self.search_bar_stocks.grid(row=1, column=0, columnspan=1, padx=(10, 0), pady=(10, 10), sticky="nsew")
-
-        # Search symbol button
-        self.search_symbols_btn = ctk.CTkButton(self.home_frame, text="Search", fg_color="transparent", border_width=2, text_color=("gray10", "#DCE4EE"),
-                                                 command=self.search_symbols, width=50)
-        self.search_symbols_btn.grid(row=1, column=1, padx=(10, 10), pady=(10, 10), sticky="nsew")
-
-        # Correlate Button
-        self.correlate_btn = ctk.CTkButton(master=self.home_frame, text="Correlate", fg_color="transparent", border_width=2,
-                                          text_color=("gray10", "#DCE4EE"), width=50)
-
-        self.correlate_btn.grid(row=1, column=2, padx=(0, 10), pady=(10, 10), sticky="w")
 
         # Output text box
         self.output_textbox = ctk.CTkTextbox(self.home_frame)
@@ -339,7 +347,7 @@ class App(ctk.CTk):
         toolbar._message_label.config(foreground='#FFFFFF')
         toolbar.update()
         # Side bar correlations button
-        self.correlations_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Correlations",
+        self.correlations_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Heatmap",
                                                    fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
                                                    anchor="w", command=self.correlations_button_event)
         self.correlations_button.grid(row=1, column=0, sticky="ew")
@@ -351,15 +359,19 @@ class App(ctk.CTk):
 
         self.correlations_table = UI_Table(self.correlations_frame)
 
+        # Side bar anomalies button
         self.anomalies_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="Anomalies",
                                                    fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
                                                    anchor="w", command=self.anomalies_button_event)
         
         self.anomalies_button.grid(row=2, column=0, sticky="ew")
+        # Anomalies frame
         self.anomalies_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
         self.anomalies_frame.rowconfigure(0, weight=0)
         self.anomalies_frame.columnconfigure((0,1), weight=0)
         self.anomalies_frame.columnconfigure(2, weight=1)
+        self.anomalies_frame.rowconfigure(1, weight=1)
+        # Combo boxes to select stock anomalies
         self.combobox_1 = ctk.CTkComboBox(self.anomalies_frame, command=self.combobox_callback, width=120)
         self.combobox_1.grid(row=0, column = 0, padx=(10,10), pady=(10,10))
         self.combobox_2 = ctk.CTkComboBox(self.anomalies_frame, command=self.combobox_callback, width=120)
@@ -371,6 +383,35 @@ class App(ctk.CTk):
         self.anomalies_canvas = FigureCanvasTkAgg(self.anomalies_plot_fig, master=self.anomalies_frame)
         self.anomalies_canvas.get_tk_widget().grid(row=1, column=0, columnspan=3, sticky = "nsew")
 
+        # Side bar PMFG button
+        self.pmfg_button = ctk.CTkButton(self.navigation_frame, corner_radius=0, height=40, border_spacing=10, text="PMFG",
+                                                   fg_color="transparent", text_color=("gray10", "gray90"), hover_color=("gray70", "gray30"),
+                                                   anchor="w", command=self.pmfg_button_event)
+        self.pmfg_button.grid(row=3, column=0, sticky="ew")
+        # PMFG frame
+        self.pmfg_frame = ctk.CTkFrame(self, corner_radius=0, fg_color="transparent")
+        self.pmfg_frame.rowconfigure(2, weight=1)
+        self.pmfg_frame.columnconfigure(2, weight=1)
+
+        # PMFG plot
+        self.pmfg_plot_fig = Figure(figsize=(5,5), dpi=100)
+        self.pmfg_plot_fig.patch.set_facecolor('#242424')
+        self.pmfg_canvas = FigureCanvasTkAgg(self.pmfg_plot_fig, master=self.pmfg_frame)
+        self.pmfg_canvas.get_tk_widget().grid(row=2, column=0, columnspan=3, sticky = "nsew")
+        self.louvain_checkbox = ctk.CTkCheckBox(self.pmfg_frame, command=self.pmfg_callback, text="Identify Communities")
+        self.louvain_checkbox.grid(row=0, column=0, padx=(10,10))
+        self.thresh_checkbox = ctk.CTkCheckBox(self.pmfg_frame, command=self.pmfg_callback, text="Utilize Threshold")
+        self.thresh_checkbox.grid(row=0, column=1, padx=(10,0))
+        # Create a toolbar and grid it onto the app
+        toolbar = NavigationToolbar2Tk(self.pmfg_canvas, self.pmfg_frame, pack_toolbar=False)
+        toolbar.grid(row=0, column=2)
+        #toolbar.setStyleSheet("background-color:Gray14;")
+        toolbar.config(bg='#242424')
+        toolbar._message_label.config(background='#242424')
+        toolbar._message_label.config(foreground='#FFFFFF')
+        toolbar.update()
+
+
         # Start the app on the home frame
         self.select_frame_by_name("home")
 
@@ -379,6 +420,7 @@ class App(ctk.CTk):
         self.home_button.configure(fg_color=("gray75", "gray25") if name == "home" else "transparent")
         self.correlations_button.configure(fg_color=("gray75", "gray25") if name == "correlations" else "transparent")
         self.anomalies_button.configure(fg_color=("gray75", "gray25") if name == "anomalies" else "transparent")
+        self.pmfg_button.configure(fg_color=("gray75", "gray25") if name == "pmfg" else "transparent")
 
         # show selected frame
         if name == "home":
@@ -393,6 +435,10 @@ class App(ctk.CTk):
             self.anomalies_frame.grid(row=0, rowspan=4, column=1, sticky="nsew")
         else:
             self.anomalies_frame.grid_forget()
+        if name == "pmfg":
+            self.pmfg_frame.grid(row=0, rowspan=4, column=1, sticky="nsew")
+        else:
+            self.pmfg_frame.grid_forget()
 
     # Function triggered by the frame home button
     def home_button_event(self):
@@ -401,43 +447,70 @@ class App(ctk.CTk):
     # Function triggered by the frame correlations_button
         # It will add columns and rows to the correlation table
     def correlations_button_event(self):
-        self.correlations_table.update_columns(self.symbols_lst)
-        for stock in self.stocks_array:
-            correlation_data = [ '%.2f' % elem for elem in stock.correlation ]
-            self.correlations_table.insert_row(correlation_data)
-        self.correlations_table.update_index()
-        self.correlations_table.heat_map()
-        self.select_frame_by_name("correlations")
+        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread) and (self.n_symbols > 0):
+            self.correlations_table.update_columns(self.symbols_lst)
+            for stock in self.stocks_array:
+                correlation_data = [ '%.2f' % elem for elem in stock.correlation ]
+                self.correlations_table.insert_row(correlation_data)
+            self.correlations_table.update_index()
+            self.correlations_table.heat_map()
+            self.select_frame_by_name("correlations")
 
     def anomalies_button_event(self):
-        combobox_var1 = ctk.StringVar(value=self.stocks_array[0].symbol)  # set initial value
-        self.combobox_1.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var1)
-        if self.n_symbols <= 1:
-            self.combobox_2.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var1)
-        else:
-            combobox_var2 = ctk.StringVar(value=self.stocks_array[1].symbol)  # set initial value
-            self.combobox_2.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var2)
-        self.select_frame_by_name("anomalies")
+        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread) and (self.n_symbols > 0):
+            combobox_var1 = ctk.StringVar(value=self.stocks_array[0].symbol)  # set initial value
+            self.combobox_1.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var1)
+            if self.n_symbols <= 1:
+                self.combobox_2.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var1)
+            else:
+                combobox_var2 = ctk.StringVar(value=self.stocks_array[1].symbol)  # set initial value
+                self.combobox_2.configure(values=[stock.symbol for stock in self.stocks_array], variable=combobox_var2)
+            self.select_frame_by_name("anomalies")
 
+    def pmfg_button_event(self):
+        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread) and (self.n_symbols > 0) and (not self.pmfg_thread):
+            self.pmfg_thread = True
+            self.pmfg_callback()
+            self.pmfg_thread = False
+            self.select_frame_by_name("pmfg")
+        
+    # Function to get combo boxes Symbols
     def combobox_callback(self, choice):
-        symbol_1 = self.combobox_1.get()
-        symbol_2 = self.combobox_2.get()
-        if symbol_1 != symbol_2:
-            self.iqr_anomaly_detector(symbol_1, symbol_2)
+        if (not self.add_thread) and (not self.update_stocks_thread) and (not self.init_thread) and (self.n_symbols > 0):
+            symbol_1 = self.combobox_1.get()
+            symbol_2 = self.combobox_2.get()
+            if symbol_1 != symbol_2:
+                labels, index_1, index_2 = self.anomaly_detector(symbol_1, symbol_2)
+                self.plot_anomalies(labels, self.stocks_array[index_1].correlations_history[index_2], symbol_1, symbol_2)
 
-    # Create the plot graphic
+    def pmfg_callback(self):
+        if self.louvain_checkbox.get() == 0:
+            PMFG, sectors = self.create_graph(0)
+            self.plot_PMFG(PMFG, sectors)
+        else:
+            PMFG, sectors = self.create_graph(1)
+            self.plot_communities(PMFG)
+
+    # Create the plot graphic for anomalies
     def plot_anomalies(self, labels, values, symbol_1, symbol_2):
         self.anomalies_plot_fig.clf()
         ax = self.anomalies_plot_fig.add_subplot(111)
         for spine in ax.spines.values():
             spine.set_edgecolor('white')
         colors = ['g' if l == 0 else 'r' for l in labels]
-        x = [value for value in range(Stock.n_windows)]
+        print(labels)
+        print(len(colors))
+        x = [value for value in range(1,Stock.n_windows+1)]
+        ticks_lab = [Stock.n_windows-value for value in range(0,Stock.n_windows+1) if value % 10 == 0]
+        ticks_loc = [value for value in range(0,Stock.n_windows+1) if value%10 == 0]
+
         ax.scatter(x, values, c = colors)
         ax.legend(frameon=False)
+        ax.set_xticks(ticks_loc) 
+        ax.set_xticklabels(ticks_lab)
         ax.set_facecolor('#2B2B2B')
         ax.set_title(symbol_1 + " and " + symbol_2 + " correlation anomalies")
-        ax.set_xlabel("Days")
+        ax.set_xlabel("Business Days gone by")
         ax.set_ylabel("Correlation")
         self.anomalies_canvas.draw()
         return self.anomalies_canvas.get_tk_widget()
@@ -452,10 +525,14 @@ class App(ctk.CTk):
             for stock in self.stocks_array:
                 if stock.symbol == symbols_plot[i]:
                     ax.plot(stock.rentability, label = symbols_plot[i])
+        ticks_lab = [Stock.n_ticks + Stock.n_windows -value for value in range(0,Stock.n_ticks + Stock.n_windows + 1) if value % 10 == 0]
+        ticks_loc = [value for value in range(0,Stock.n_ticks + Stock.n_windows + 1) if value%10 == 0]
         ax.legend(frameon=False)
+        ax.set_xticks(ticks_loc) 
+        ax.set_xticklabels(ticks_lab)
         ax.set_facecolor('#2B2B2B')
         ax.set_title("Rentability")
-        ax.set_xlabel("Days")
+        ax.set_xlabel("Business Days gone by")
         ax.set_ylabel("Log(Value)")
         self.canvas.draw()
         return self.canvas.get_tk_widget()
@@ -500,9 +577,10 @@ class App(ctk.CTk):
         except ValueError as e:                                     # If there's an error it shows the error to the user
             self.n_symbols -= 1
             Stock.n_stocks = self.n_symbols
-            self.output_textbox.configure(state="normal")
-            self.output_textbox.insert(ctk.END, str(e))
-            self.output_textbox.configure(state="disabled")
+            #self.output_textbox.configure(state="normal")
+            #self.output_textbox.insert(ctk.END, str(e))
+            #self.output_textbox.configure(state="disabled")
+            self.insert_text(str(e))
             return 0                                                # failure
                   
     # Function triggered by the correlationn button
@@ -510,17 +588,13 @@ class App(ctk.CTk):
         while (self.add_thread or self.update_stocks_thread or self.init_thread):
             time.sleep(1)
         self.init_thread = True
-        t = th.Thread(target=self.init_metrics)
-        t.setDaemon(True)
-        t.start()
-        self.output_textbox.configure(state="normal")
-        self.output_textbox.insert(ctk.END, "The correlation is finished\n")
-        self.output_textbox.configure(state="disabled")
+        self.init_metrics()
         self.init_thread = False
 
     # Calculates the correlation of stocks
+
     def init_metrics(self):
-        for i in range(self.n_symbols):
+        for i in range(self.n_symbols):                                               #calculate the correlation for the 1 window
             if i < (self.n_symbols-self.n_stocks_added):
                 self.stocks_array[i].set_index(0)
             for j in range(self.n_symbols-self.n_stocks_added, self.n_symbols):
@@ -528,34 +602,42 @@ class App(ctk.CTk):
                 if j >= i:
                     self.calc_correlation(i,j,0)
             print("correlation_history: ", self.stocks_array[i].correlations_history)
-
+        
         for k in range(1, Stock.n_windows):                                           #calculate the correlations
+            print(k)
             for i in range(self.n_symbols-self.n_stocks_added, self.n_symbols):
                 self.stocks_array[i].update_metrics(k)
             for i in range(self.n_symbols):
-                self.stocks_array[i].set_index(k) #fazer apenas quando nas stocks antigas
+                self.stocks_array[i].set_index(k)                                     #fazer apenas quando nas stocks antigas
                 for j in range(self.n_symbols-self.n_stocks_added, self.n_symbols):
                     if j>=i:
                         self.calc_correlation(i,j,k)
-            print(k)
 
         for i in range(self.n_symbols):
             self.stocks_array[i].set_last_correlation()
+        self.insert_text("The correlation is finished\n")
 
     def calc_correlation(self,i,j,k):
         if i == j:
             self.stocks_array[i].correlations_history[j].append(1)
         else:
-            result = self.stocks_array[i].calc_correlation(j, self.stocks_array[j].get_deviations(), self.stocks_array[j].std_dev[k], k)
+            result, index = self.stocks_array[i].calc_correlation(j, self.stocks_array[j].get_deviations(), self.stocks_array[j].std_dev[k], k)
             self.stocks_array[j].correlations_history[i].append(self.stocks_array[i].correlations_history[j][k])
             if result == 1:                                 # Tells the user that the values of a stock remained static
-                self.output_textbox.configure(state="normal")
-                self.output_textbox.insert(ctk.END, "The close values of " + self.symbols_lst[i] + "are exactly the same over the time period\n")
-                self.output_textbox.configure(state="disabled")
+                #self.output_textbox.configure(state="normal")
+                if index == -1:
+                    #self.output_textbox.insert(ctk.END, "The close values of " + self.symbols_lst[i] + " are exactly the same over the time period\n")
+                    self.insert_text("The close values of " + self.symbols_lst[i] + " are exactly the same over the time period\n")
+                else:
+                    #self.output_textbox.insert(ctk.END, "The close values of " + self.symbols_lst[j] + " are exactly the same over the time period\n")
+                    self.insert_text("The close values of " + self.symbols_lst[j] + " are exactly the same over the time period\n")
+                #self.output_textbox.configure(state="disabled")
         x = list(itertools.islice(self.stocks_array[i].rentability, k, Stock.n_ticks-1+k))
         y = list(itertools.islice(self.stocks_array[j].rentability, k, Stock.n_ticks-1+k))
         z, _ = pearsonr(x, y)
         print(z,":", self.stocks_array[i].correlations_history[j][k])
+
+
 
     # Function that updates the plot every time an item is checked
     def checkbox_frame_event(self):
@@ -579,28 +661,46 @@ class App(ctk.CTk):
             self.update_stocks_thread = False
             print("Minutes till next update: " + str(min_til))
             time.sleep(sec_til)
-            while ((self.add_thread != False) and (self.init_thread != False)):
+            while ((self.add_thread != False) or (self.init_thread != False)):
                 print("Sleeping")
                 time.sleep(1)
             self.update_stocks_thread = True
-            for stock in self.stocks_array:
-                try:
-                    status = stock.check_market_status()            # check the if the market changed from close->open or open->close
-                    print(status)
-                    if status == 0:
-                        self.output_textbox.configure(state="normal")
-                        self.output_textbox.insert(ctk.END, "Updated the value of the Stock " + stock.symbol + ", (" + str(stock.close_data[0])+ "," + str(stock.close_data[self.n_ticks-1]) + ")")
-                        stock.update_metrics_realtime()
-                        self.output_textbox.insert(ctk.END, " -> (" + str(stock.close_data[0]) + "," + str(stock.close_data[self.n_ticks-1]) + ")\n")
-                        self.output_textbox.configure(state="disabled")
-                except ValueError as e:  
-                        self.output_textbox.configure(state="normal")
-                        self.output_textbox.insert(ctk.END, str(e))
-                        self.output_textbox.configure(state="disabled")
+            stocks_updated = []
+            self.insert_text("Evaluating markets\n")
+            i = 0
+            while i < len(self.stocks_array):
+                stock = self.stocks_array[i]
+                status = stock.check_market_status()            # check the if the market changed from close->open or open->close
+                print(status)
+                if status == 0:
+                    #self.insert_text("Updated the value of the Stock " + stock.symbol + ", (" + str(stock.close_data[0])+ "," + str(stock.close_data[self.n_ticks-1]) + ")")
+                    stock.update_metrics_realtime()
+                    #self.insert_text( " -> (" + str(stock.close_data[0]) + "," + str(stock.close_data[self.n_ticks-1]) + ")\n")
+                    stocks_updated.append(self.symbols_lst.index(stock.symbol))
+                    i += 1
+                elif status != 3:
+                    i += 1
+                else:  
+                    time.sleep(30)
+            if len(stocks_updated) >= 1:
+                self.insert_text("Calculating new correlation values\n")
+                for i in stocks_updated:
+                    for j in range(self.n_symbols):
+                        if j > i and (j in stocks_updated):
+                            pass
+                        else:
+                            self.calc_correlation(i,j,Stock.n_windows-1)
+                self.insert_text("Evaluating anomalies\n")
+                for i in stocks_updated:
+                    for j in range(self.n_symbols):
+                        if j > i and (j in stocks_updated):
+                            pass
+                        elif self.stocks_array[i].correlations_history[j][Stock.n_windows-1] > 0.5 or self.stocks_array[i].correlations_history[j][Stock.n_windows-1] < -0.5:
+                            labels, index_1, index_2 = self.anomaly_detector(self.symbols_lst[i],self.symbols_lst[j])
+                            if labels[-1] == 1:
+                                tk.messagebox.showinfo("Anomaly","Anomaly on the correlation of stocks: " + self.symbols_lst[i] + " and " + self.symbols_lst[j])
+            self.insert_text("Finished the update\n")
 
-            for i in range(self.n_symbols):
-                for j in range(i, self.n_symbols):
-                    self.calc_correlation(i,j,Stock.n_windows-1)
 
             
     # Removes stock from lists
@@ -613,28 +713,214 @@ class App(ctk.CTk):
             self.stocks_array[i].correlation.pop(idx)
             self.stocks_array[i].correlations_history.pop(idx)
 
+    def insert_text(self,text):
+        self.output_textbox.configure(state="normal")
+        if self.textbox_n_lines > 100:
+            contents = self.output_textbox.get('1.0', 'end')
+            lines = contents.split('\n')
+            del lines[0]
+            if lines[-1] == '':
+                del lines[-1]
+            line_end_index = self.output_textbox.index('1.end')
+            new_contents = '\n'.join(lines)
+            self.output_textbox.delete('1.0', 'end')
+            self.output_textbox.insert('1.0', new_contents)
+            #self.output_textbox.delete("1.0", line_end_index)
+            self.textbox_n_lines -= 1
+        self.output_textbox.insert(ctk.END, text)
+        self.output_textbox.configure(state="disabled")
+        self.textbox_n_lines += 1
 
-    def find_anomalies(self, value, lower_threshold, upper_threshold):
-        if value < lower_threshold or value > upper_threshold:
-            return 1
-        else: 
-            return 0
-
-    def iqr_anomaly_detector(self, symbol_1, symbol_2, threshold=1.1):
+    def anomaly_detector(self, symbol_1, symbol_2):
         index_1 = self.symbols_lst.index(symbol_1)
         index_2 = self.symbols_lst.index(symbol_2)
-        idx_quartile_1 = int(Stock.n_windows*0.25)
-        idx_quartile_3 = int(Stock.n_windows*0.75)
-        quartile_1 = self.stocks_array[index_1].correlations_history[index_2][idx_quartile_1]
-        quartile_3 = self.stocks_array[index_1].correlations_history[index_2][idx_quartile_3]
-        iqr = quartile_3 - quartile_1
+        data = list(collections.deque(self.stocks_array[index_1].correlations_history[index_2]))
+        print(data)
+        temp_data = np.array([i for i in range(len(data))]).reshape(-1,1)
+        lof_anomalies = self.LOF_anomaly_detector(data, temp_data)
+        kol_smir_test = stats.kstest(data,stats.norm.cdf)
+        labels = [0] * Stock.n_windows
+        if kol_smir_test.pvalue > 0.05:
+            dist_anomalies = self.mod_score_detector(data, lof_anomalies)
+            print("Distribuicao Normal")
+        else:
+            dist_anomalies = self.MAD_anomaly_detector(data, lof_anomalies)
+            print("Distribuicao Nao Normal")
+        for index in dist_anomalies:
+            labels[index] = 1
 
-        lower_threshold = quartile_1 - (threshold * iqr)
-        upper_threshold = quartile_3 + (threshold * iqr)
+        return labels, index_1, index_2
 
-        labels = [self.find_anomalies(value, quartile_1, quartile_3) for value in self.stocks_array[index_1].correlations_history[index_2]]
-        self.plot_anomalies(labels, self.stocks_array[index_1].correlations_history[index_2], symbol_1, symbol_2)
-        
+    def LOF_anomaly_detector(self, data, temp_data):
+        k = 10
+        # Calculate the LOF
+        data = np.array(data)
+        data = data.reshape(-1,1)
+        scaler = MinMaxScaler(feature_range=(-1, 1))
+        temp_data = scaler.fit_transform(temp_data)
+        data = scaler.fit_transform(data)
+        data_2D = [[temp_data[i][0],data[i][0]] for i in range(data.shape[0])]
+        data_2D = np.array(data_2D)
+        lof = LocalOutlierFactor(n_neighbors=k)
+        lof.fit(data_2D)
+        lof_scores = -lof.negative_outlier_factor_
+        # Choose the threshold for anomalies
+        threshold = 1.2
+        # Find the anomalies
+        anomalies = np.where(lof_scores > threshold)[0]
+        return anomalies
+
+    def mod_score_detector(self, data, lof_anomalies):
+        criterion = 3.5
+        median = np.median(data)
+        mad = np.median(np.abs(data - median))
+        z_scores = stats.zscore(data)
+        print(z_scores)
+        z_scores = 0.6745 * np.abs(data-median) / mad
+        anomalies = []
+        for i in range(z_scores.shape[0]):
+            if abs(z_scores[i]) >= criterion and i in lof_anomalies:
+                anomalies.append(i)
+            if abs(z_scores[i]) <= criterion and i in lof_anomalies:
+                anomalies.append(i)
+        return anomalies
+
+    def MAD_anomaly_detector(self, data, lof_anomalies):
+        # Calculate the median
+        median = np.median(data)
+        # Calculate the median absolute deviation (MAD)
+        mad = np.median(np.abs(data - median))
+        # Calculate constant
+        c = 1/np.quantile(data, 0.75)
+        # Set the threshold for anomalies
+        low_thresh = median - 2*mad*c
+        high_thresh = median + 2*mad*c
+       
+        # Find the anomalies
+        anomalies = []
+        for i in range(len(data)):
+            if (data[i] > high_thresh or data[i] < low_thresh) and i in lof_anomalies:
+                anomalies.append(i)
+            elif (data[i] < high_thresh or data[i] > low_thresh) and i in lof_anomalies:
+                anomalies.append(i)
+        return anomalies
+
+    def create_graph(self, pmfg_type):
+        complete_graph = nx.Graph()
+        sectors = np.empty(self.n_symbols, dtype='U256')
+        for i in range(self.n_symbols):
+            complete_graph.add_node(self.symbols_lst[i], name = self.symbols_lst[i])
+            sectors[i] = self.stocks_array[i].sector
+        if pmfg_type == 0:
+            for i in range(self.n_symbols):
+                for j in range(i+1, self.n_symbols):
+                    complete_graph.add_edge(self.symbols_lst[i], self.symbols_lst[j], weight=round(self.stocks_array[i].correlation[j],2))
+        else:
+            for i in range(self.n_symbols):
+                for j in range(i+1, self.n_symbols):
+                    complete_graph.add_edge(self.symbols_lst[i], self.symbols_lst[j], weight=abs(round(self.stocks_array[i].correlation[j],2)))
+        sorted_edges = self.sort_graph_edges(complete_graph)
+        unique_sectors = np.unique(sectors)
+        return self.compute_PMFG(sorted_edges, len(complete_graph.nodes), unique_sectors), unique_sectors
+
+    def sort_graph_edges(self,G):
+        sorted_edges = []
+        for source, dest, data in sorted(G.edges(data=True),
+                                         key=lambda x: (abs(x[2]['weight']), x[2]['weight'] < 0), reverse=True):
+            sorted_edges.append({'source': source,
+                                 'dest': dest,
+                                 'weight': data['weight']})
+        print(sorted_edges)
+        return sorted_edges
+
+    def compute_PMFG(self, sorted_edges, nb_nodes, sectors):
+        PMFG = nx.Graph()
+        threshold = 0
+        if self.thresh_checkbox.get() == 1:
+            threshold = 0.55
+        for edge in sorted_edges:
+            if abs(edge["weight"]) >= threshold:
+                PMFG.add_edge(edge['source'], edge['dest'], weight = edge['weight'])
+                is_planar, P = nx.check_planarity(PMFG)
+                if is_planar == False:
+                    PMFG.remove_edge(edge['source'], edge['dest'])
+            
+                if len(PMFG.edges()) == 3*(nb_nodes-2):
+                    break
+    
+        return PMFG
+
+    def plot_PMFG(self, G, sectors):
+        self.pmfg_plot_fig.clf()
+        ax = self.pmfg_plot_fig.add_subplot(111);
+        ax.set_facecolor('#2B2B2B')
+
+        pos = nx.planar_layout(G)
+        eblue = [(u, v) for (u, v, d) in G.edges(data=True) if d["weight"] >= 0.75]
+        ered = [(u, v) for (u, v, d) in G.edges(data=True) if d["weight"] <= -0.75]
+        eblack = [(u, v) for (u, v, d) in G.edges(data=True) if (d["weight"] > -0.75 and d["weight"] < 0.75)]
+        color_map = []
+        n_sectors = len(sectors)
+        colors = [x*1.0/n_sectors for x in range(n_sectors)]
+        labels = {}
+        for node in G.nodes():
+            labels[node] = node
+            for j in range(self.n_symbols):
+                if node == self.stocks_array[j].symbol:
+                    k = np.where(sectors == self.stocks_array[j].sector)
+                    color_map.append(colors[k[0][0]])
+                    break
+
+        cmap = plt.get_cmap('tab20')
+        node_colors = cmap(color_map)
+        # nodes
+        nx.draw_networkx_nodes(G, ax=ax, node_color=node_colors, pos=pos, linewidths=1, edgecolors="white")
+        nx.draw_networkx_labels(G, pos, labels, font_color="white", ax=ax)
+
+        sector_labels = cmap(colors)
+        legend_elements = [Line2D([0], [0], marker='o', color="w", label=sectors[i],
+                          markerfacecolor=sector_labels[i], markersize=15) for i in range(n_sectors)]
+
+        # edges
+        nx.draw_networkx_edges(G, pos, edgelist=ered, alpha=0.5, edge_color="r", ax=ax)
+        nx.draw_networkx_edges(G, pos, edgelist=eblue, alpha=0.5, edge_color="b", ax=ax)
+        nx.draw_networkx_edges(G, pos, edgelist=eblack, alpha=0.5, edge_color="w", ax=ax)
+
+        legend = ax.legend(handles=legend_elements, fancybox=True, framealpha=0.0)
+        self.pmfg_plot_fig.set_facecolor('#242424')
+        self.pmfg_canvas.draw()
+        return self.pmfg_canvas.get_tk_widget()
+
+    def plot_communities(self, G):
+        self.pmfg_plot_fig.clf()
+        ax = self.pmfg_plot_fig.add_subplot(111);
+        ax.set_facecolor('#2B2B2B')
+        labels = {}
+        for node in G.nodes():
+            labels[node] = node
+        #first compute the best partition
+        partition = community_louvain.best_partition(G)
+        eblue = [(u, v) for (u, v, d) in G.edges(data=True) if d["weight"] >= 0.75]
+        ered = [(u, v) for (u, v, d) in G.edges(data=True) if d["weight"] <= -0.75]
+        eblack = [(u, v) for (u, v, d) in G.edges(data=True) if (d["weight"] > -0.75 and d["weight"] < 0.75)]
+
+
+        # draw the graph
+        pos = nx.planar_layout(G)
+        # color the nodes according to their partition
+        cmap = cm.get_cmap('viridis', max(partition.values()) + 1)
+        nx.draw_networkx_nodes(G, pos, partition.keys(),
+                               cmap=cmap, node_color=list(partition.values()), ax=ax)
+
+        nx.draw_networkx_labels(G, pos, labels, font_color="white", ax=ax)
+        # edges
+        nx.draw_networkx_edges(G, pos, edgelist=ered, alpha=0.5, edge_color="r", ax=ax)
+        nx.draw_networkx_edges(G, pos, edgelist=eblue, alpha=0.5, edge_color="b", ax=ax)
+        nx.draw_networkx_edges(G, pos, edgelist=eblack, alpha=0.5, edge_color="w", ax=ax)
+
+        self.pmfg_plot_fig.set_facecolor('#242424')
+        self.pmfg_canvas.draw()
+        return self.pmfg_canvas.get_tk_widget()
 
 if __name__ == "__main__":
     app = App()
